@@ -89,7 +89,7 @@
     "dev": "tsup src/index.ts --format esm,cjs --dts --watch --external react,react-dom,@tanstack/react-table,zustand,class-variance-authority,lucide-react",
     "clean": "rimraf dist",
     "build:css": "postcss styles.css -o styles.css --config postcss.build.cjs",    
-    "prepublishOnly": "npm run clean && npm run build && tablefront stub && npm run build:css",
+    "prepublishOnly": "npm run clean && npm run build && node ./bin/cli.js stub && npm run build:css",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
