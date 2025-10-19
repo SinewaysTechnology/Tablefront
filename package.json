@@ -1,6 +1,6 @@
 {
   "name": "@sineways/react-tablefront",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "description": "React Data Table and Data Grid for TypeScript. Zero config with fast search and filters, pagination and infinite scroll, table grid and masonry layouts. Built on TanStack Table.",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -30,11 +30,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SinewaysTechnology/SinewaysLibraries.git",
+    "url": "git+https://github.com/SinewaysTechnology/Tablefront.git",
     "directory": "packages/react-tablefront"
   },
   "bugs": {
-    "url": "https://github.com/SinewaysTechnology/SinewaysLibraries/issues"
+    "url": "https://github.com/SinewaysTechnology/Tablefront.git/issues"
   },
   "homepage": "https://tablefront.sineways.tech",
   "keywords": [

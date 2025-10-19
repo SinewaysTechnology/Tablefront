@@ -98,6 +98,7 @@ export function DataGrid<TData>({
   const gridContainerRef = useRef<HTMLDivElement>(null)
   const staticRef = useRef<HTMLDivElement>(null)
   const [staticHeight, setStaticHeight] = useState<number | undefined>(undefined)
+  const [computedColumns, setComputedColumns] = useState<number>(1)
 
   useEffect(() => {
     const measure = () => {
@@ -243,6 +244,32 @@ export function DataGrid<TData>({
     icons
   ])
 
+  // Compute responsive column count like masonry based on container width
+  useEffect(() => {
+    if (!gridContainerRef.current) return
+
+    const updateColumns = () => {
+      const container = gridContainerRef.current
+      if (!container) return
+
+      if (gridColumns && gridColumns > 0) {
+        setComputedColumns(gridColumns)
+        return
+      }
+
+      const containerWidth = container.offsetWidth
+      const cols = Math.max(1, Math.floor(containerWidth / gridItemMinWidth))
+      setComputedColumns(cols)
+    }
+
+    updateColumns()
+    const ro = new ResizeObserver(updateColumns)
+    ro.observe(gridContainerRef.current)
+    return () => {
+      ro.disconnect()
+    }
+  }, [gridColumns, gridItemMinWidth])
+
   return (
     <>
       {customStaticRows.length > 0 && (
@@ -262,11 +289,10 @@ export function DataGrid<TData>({
       <div 
         className={tableStyles.grid.container}
         style={{
-          // If gridColumns is set and > 0, use fixed columns
-          // Otherwise, use responsive auto-fit with gridItemMinWidth
-          gridTemplateColumns: gridColumns && gridColumns > 0
-            ? `repeat(${gridColumns}, 1fr)`
-            : `repeat(auto-fit, minmax(${gridItemMinWidth}px, 1fr))`,
+          // Mirror masonry behavior: computed column count and flexible tracks that fill container
+          width: '100%',
+          maxWidth: '100%',
+          gridTemplateColumns: `repeat(${computedColumns}, 1fr)`,
         }}
         ref={gridContainerRef}
       >

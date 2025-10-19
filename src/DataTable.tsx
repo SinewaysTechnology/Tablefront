@@ -961,7 +961,7 @@ export function DataTable<TData>({
         <ScrollAreaComponent>
         {(displayMode === 'grid' || displayMode === 'masonry') && null}
         {displayMode === 'grid' ? (
-          effectiveDisplayRows.length > 0 ? (
+          <>
             <DataGrid
               displayRows={effectiveDisplayRows}
               displayMode={displayMode}
@@ -988,19 +988,20 @@ export function DataTable<TData>({
               tableStyles={tableStyles}
               icons={effectiveIcons}
             />
-          ) : (
-            <DataTableStates
-              showLoadingState={false}
-              showEmptyState={true}
-              isLoading={isLoading}
-              loadingText={loadingText}
-              emptyStateText={emptyStateText}
-              tableStyles={tableStyles}
-              icons={effectiveIcons}
-            />
-          )
+            {effectiveDisplayRows.length === 0 && !isLoading && (
+              <DataTableStates
+                showLoadingState={false}
+                showEmptyState={true}
+                isLoading={isLoading}
+                loadingText={loadingText}
+                emptyStateText={emptyStateText}
+                tableStyles={tableStyles}
+                icons={effectiveIcons}
+              />
+            )}
+          </>
         ) : displayMode === 'masonry' ? (
-          effectiveDisplayRows.length > 0 ? (
+          <>
             <DataMasonry
               displayRows={effectiveDisplayRows}
               displayMode={displayMode}
@@ -1027,17 +1028,18 @@ export function DataTable<TData>({
               tableStyles={tableStyles}
               icons={effectiveIcons}
             />
-          ) : (
-            <DataTableStates
-              showLoadingState={false}
-              showEmptyState={true}
-              isLoading={isLoading}
-              loadingText={loadingText}
-              emptyStateText={emptyStateText}
-              tableStyles={tableStyles}
-              icons={effectiveIcons}
-            />
-          )
+            {effectiveDisplayRows.length === 0 && !isLoading && (
+              <DataTableStates
+                showLoadingState={false}
+                showEmptyState={true}
+                isLoading={isLoading}
+                loadingText={loadingText}
+                emptyStateText={emptyStateText}
+                tableStyles={tableStyles}
+                icons={effectiveIcons}
+              />
+            )}
+          </>
         ) : (
             <>
               <table 
