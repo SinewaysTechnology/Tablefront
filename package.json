@@ -1,0 +1,123 @@
+{
+  "name": "@sineways/react-tablefront",
+  "version": "1.0.0-beta.1",
+  "description": "React Data Table and Data Grid for TypeScript. Zero config with fast search and filters, pagination and infinite scroll, table grid and masonry layouts. Built on TanStack Table.",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./styles.css": "./styles.css"
+  },
+  "files": [
+    "dist",
+    "styles.css",
+    "README.md",
+    "LICENSE.md",    
+    "src/tools/validator.min.mjs",
+    "bin/cli.js"
+  ],
+  "sideEffects": [
+    "dist/styles.css",
+    "styles.css",
+    "dist/license.globals.mjs",
+    "dist/license.globals.cjs"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SinewaysTechnology/SinewaysLibraries.git",
+    "directory": "packages/react-tablefront"
+  },
+  "bugs": {
+    "url": "https://github.com/SinewaysTechnology/SinewaysLibraries/issues"
+  },
+  "homepage": "https://tablefront.sineways.tech",
+  "keywords": [
+    "react",
+    "front-end",
+    "web",
+    "react table",
+    "react datatable",
+    "react data table",
+    "react datagrid",
+    "data table",
+    "datatable",
+    "data grid",
+    "datagrid",
+    "table component",
+    "react table component",
+    "sorting",
+    "filtering",
+    "search",
+    "pagination",
+    "infinite scroll",
+    "virtualized",
+    "column resize",
+    "column drag",
+    "row expansion",
+    "grid layout",
+    "masonry layout",
+    "typescript",
+    "tanstack table",
+    "@tanstack/react-table",
+    "zustand",
+    "tailwind",
+    "ui library",
+    "tablefront",
+    "sineways",
+    "commercial",
+    "premium",
+    "licensed"
+  ],
+  "author": "Sineways Technology",
+  "license": "Commercial",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "type": "module",
+  "bin": {
+    "tablefront": "bin/cli.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --external react,react-dom,@tanstack/react-table,zustand,class-variance-authority,lucide-react",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch --external react,react-dom,@tanstack/react-table,zustand,class-variance-authority,lucide-react",
+    "clean": "rimraf dist",
+    "build:css": "postcss styles.css -o styles.css --config postcss.build.cjs",    
+    "prepublishOnly": "npm run clean && npm run build && tablefront stub && npm run build:css",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@tanstack/react-table": ">=8.0.0 <9",
+    "class-variance-authority": ">=0.7.1 <1",
+    "lucide-react": ">=0.400.0 <1",
+    "react": ">=18.2.0 <20",
+    "react-dom": ">=18.2.0 <20",
+    "zustand": ">=4.0.0 <6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@tailwindcss/postcss": "^4.0.6",
+    "tailwindcss": "^4.0.6",
+    "postcss": "^8.5.2",
+    "postcss-cli": "^11.0.0",
+    "rimraf": "^6.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
+    "tailwind-merge": "^3.3.1",
+    "tailwindcss-animate": "^1.0.7"
+  }
+}

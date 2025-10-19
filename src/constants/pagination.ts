@@ -1,0 +1,3 @@
+export const STANDARD_PAGE_SIZE = 25
+export const INFINITE_SCROLL_INCREMENT = 25
+export const SCROLL_THRESHOLD = 100 
