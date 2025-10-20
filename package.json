@@ -1,6 +1,6 @@
 {
   "name": "@sineways/react-tablefront",
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.3",
   "description": "React Data Table and Data Grid for TypeScript. Zero config with fast search and filters, pagination and infinite scroll, table grid and masonry layouts. Built on TanStack Table.",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

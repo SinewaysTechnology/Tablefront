@@ -160,6 +160,7 @@ export function DataTable<TData>({
     setColumnOrder,
     columnOrder,
     pagination,
+    resetTableState,
   } = useDataTableState({
       data, 
     columns,
@@ -199,6 +200,28 @@ export function DataTable<TData>({
     clearFilters,
     parentContainerRef,
   })
+  
+  // Central reset handler for settings popover
+  const handleResetTable = useCallback(() => {
+    // Reset store-managed table state
+    resetTableState?.()
+
+    // Reset all column widths (store and DOM)
+    try {
+      effectiveColumns.forEach(col => {
+        const accessorKey = (col as { accessorKey?: string })?.accessorKey
+        const columnId = (col.id || String(accessorKey || '')) as string
+        if (columnId) {
+          resetColumnWidth(columnId)
+          clearColumnStyles(columnId)
+        }
+      })
+    } catch {}
+
+    // Clear filters and search
+    try { handleClearFilters() } catch {}
+    try { handleClearSearch() } catch {}
+  }, [resetTableState, effectiveColumns, resetColumnWidth, handleClearFilters, handleClearSearch])
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   
   const windowSize = useWindowResize();
@@ -942,6 +965,7 @@ export function DataTable<TData>({
           showSearchBar,
           showColumnVisibility,
           showFilterButton,
+          showResetTableButtonInSettings: layout.showResetTableButtonInSettings,
         }}
         headerRightElement={headerRightElement}
         filteredDataLength={filteredData.length}
@@ -949,6 +973,7 @@ export function DataTable<TData>({
                 uiComponents={uiComponents}
         tableStyles={tableStyles}
                 icons={effectiveIcons}
+        onResetTable={handleResetTable}
       />
 
       <div

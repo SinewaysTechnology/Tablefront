@@ -23,6 +23,7 @@ export interface DataTableHeaderProps<TData> {
   filterStore?: any
   filters: any[]
   onClearFilters: () => void
+  onResetTable?: () => void
   
   // Layout controls
   layout: {
@@ -30,6 +31,7 @@ export interface DataTableHeaderProps<TData> {
     showSearchBar?: boolean
     showColumnVisibility?: boolean
     showFilterButton?: boolean
+    showResetTableButtonInSettings?: boolean
   }
   
   // Header elements
@@ -82,6 +84,7 @@ export const DataTableHeader = React.memo(<TData,>({
   filterStore,
   filters,
   onClearFilters,
+  onResetTable,
   layout,
   headerRightElement,
   filteredDataLength,
@@ -211,6 +214,8 @@ export const DataTableHeader = React.memo(<TData,>({
               uiComponents={uiComponents}
               icons={icons}
               styles={tableStyles.columnVisibility}
+              showResetButton={!!layout.showResetTableButtonInSettings}
+              onResetTable={onResetTable}
             />
           )}
           {headerRightElement}

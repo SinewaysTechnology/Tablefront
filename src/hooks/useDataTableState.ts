@@ -106,7 +106,8 @@ export function useDataTableState<TData>({
     setColumnVisibility,
     setColumnOrder,
     setColumnWidth,
-    resetColumnWidth
+    resetColumnWidth,
+    resetTableState
   } = tableStore()
 
   // ============================================================================
@@ -538,5 +539,6 @@ export function useDataTableState<TData>({
     setPagination,
     setColumnVisibility,
     setColumnOrder,
+    resetTableState,
   }
 } 

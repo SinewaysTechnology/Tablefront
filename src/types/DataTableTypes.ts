@@ -128,6 +128,7 @@ export interface DataTableLayout {
   showTableHeaders?: boolean
   showColumnVisibility?: boolean
   showFilterButton?: boolean
+  showResetTableButtonInSettings?: boolean
   displayMode?: 'table' | 'grid' | 'masonry'
   gridColumns?: number // If > 0, shows exactly this many columns. If 0 or undefined, uses responsive auto-fit with gridItemMinWidth
   gridItemMinWidth?: number

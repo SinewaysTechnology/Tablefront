@@ -32,6 +32,8 @@ interface ColumnVisibilityPopoverProps {
     item?: string
     checkbox?: string
   }
+  showResetButton?: boolean
+  onResetTable?: () => void
 }
 
 export const ColumnVisibilityPopover = ({
@@ -39,7 +41,9 @@ export const ColumnVisibilityPopover = ({
   className,
   uiComponents = {},
   icons,
-  styles = {}
+  styles = {},
+  showResetButton = false,
+  onResetTable
 }: ColumnVisibilityPopoverProps) => {
   const [open, setOpen] = useState(false)
   
@@ -64,6 +68,7 @@ export const ColumnVisibilityPopover = ({
   
   // Memoize button component to prevent recreation
   const TriggerButton = useMemo(() => ColumnButton || Button || SimpleButton, [ColumnButton, Button])
+  const ResetButton = useMemo(() => Button || SimpleButton, [Button])
 
   // Memoize default styles to prevent recreation
   const defaultStyles = useMemo(() => ({
@@ -203,7 +208,7 @@ export const ColumnVisibilityPopover = ({
               const isVisible = columnVisibility[column.id] !== false;
 
               return (
-                                  <div 
+                <div 
                     key={column.id}
                     className={cn(
                       finalStyles.item, 
@@ -226,6 +231,25 @@ export const ColumnVisibilityPopover = ({
               )
             })}
           </div>
+
+          {showResetButton && (
+            <>
+              <Separator />
+              <div className="pt-2">
+                <ResetButton
+                  type="button"
+                  className="w-full text-xs"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onResetTable?.()
+                    setOpen(false)
+                  }}
+                >
+                  Reset table
+                </ResetButton>
+              </div>
+            </>
+          )}
         </div>
       </PopoverContent>
     </Popover>
