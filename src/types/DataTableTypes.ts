@@ -26,28 +26,46 @@ export interface SmartHeaderProps {
  * UI Components that can be overridden for customization
  */
 export interface DataTableUIComponents {
+  /** Button component used throughout. @example ({ className, ...p }) => <button {...p} /> */
   Button?: React.ComponentType<React.ButtonHTMLAttributes<HTMLButtonElement>>
+  /** Trigger for Filter popover. */
   FilterButton?: React.ComponentType<React.ButtonHTMLAttributes<HTMLButtonElement>>
+  /** Trigger for Column Visibility popover. */
   ColumnButton?: React.ComponentType<React.ButtonHTMLAttributes<HTMLButtonElement>>
+  /** Clear filters button. */
   ClearButton?: React.ComponentType<React.ButtonHTMLAttributes<HTMLButtonElement>>
+  /** Clear search input button. */
   ClearSearchButton?: React.ComponentType<React.ButtonHTMLAttributes<HTMLButtonElement>>
+  /** Pagination button component. */
   PaginationButton?: React.ComponentType<React.ButtonHTMLAttributes<HTMLButtonElement>> | React.ForwardRefExoticComponent<React.ButtonHTMLAttributes<HTMLButtonElement> & React.RefAttributes<HTMLButtonElement>>
+  /** Button used for individual filter chips inside FilterPopover. */
   FilterItemButton?: React.ComponentType<React.ButtonHTMLAttributes<HTMLButtonElement>>
+  /** Scroll area wrapper used around table/grid. */
   ScrollArea?:
     | React.ComponentType<{ className?: string; children?: React.ReactNode }>
     | React.ForwardRefExoticComponent<
         { className?: string; children?: React.ReactNode } &
         React.RefAttributes<HTMLDivElement>
       >
+  /** Popover root component. */
   Popover?: React.ComponentType<{ children: React.ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }>
+  /** Popover trigger wrapper. */
   PopoverTrigger?: React.ComponentType<{ children: React.ReactNode; asChild?: boolean }>
+  /** Popover content wrapper. */
   PopoverContent?: React.ComponentType<{ children: React.ReactNode; className?: string; align?: 'center' | 'start' | 'end'; sideOffset?: number }>
+  /** Tooltip root component. */
   Tooltip?: React.ComponentType<{ children: React.ReactNode }>
+  /** Tooltip trigger wrapper. */
   TooltipTrigger?: React.ComponentType<{ children: React.ReactNode; asChild?: boolean }>
+  /** Tooltip content wrapper. */
   TooltipContent?: React.ComponentType<{ children: React.ReactNode; className?: string }>
+  /** Switch control used in visibility popover. */
   Switch?: React.ComponentType<{ checked?: boolean; onCheckedChange?: (checked: boolean) => void; className?: string; id?: string }>
+  /** Label component used in settings. */
   Label?: React.ComponentType<{ children?: React.ReactNode; htmlFor?: string; className?: string }>
+  /** Separator line used in settings. */
   Separator?: React.ComponentType<{ className?: string }>
+  /** Fallback icon used for settings trigger. */
   Settings02Icon?: React.ComponentType<{ className?: string }>
 }
 
@@ -56,62 +74,199 @@ export interface DataTableUIComponents {
  */
 export interface DataTableProps<TData> {
   // Core data and configuration
+  /**
+   * The array of data objects to render.
+   * @example
+   * const rows = [{ id: 1, name: 'Alice' }];
+   * <DataTable data={rows} />
+   */
   data: TData[]
+  /**
+   * Column definitions compatible with @tanstack/react-table.
+   * If omitted, columns can be auto-generated upstream.
+   * @example
+   * const columns = [{ accessorKey: 'name', header: 'Name' }];
+   */
   columns?: ColumnDef<TData, any>[]
+  /**
+   * Override visibility, header, cell, alignment, and meta per column id.
+   * @default {}
+   * @example
+   * { name: { header: 'Full name', headerAlignment: 'center' } }
+   */
   columnOverrides?: ColumnOverrides<TData>
   /**
-   * Initial column visibility configuration applied on first use only.
-   * - byId: map of columnId => boolean (true to show, false to hide)
-   * - hideAll: if true, hide all columns by default (byId can override)
+   * Initial column visibility applied on first use only.
+   * - byId: map of columnId => boolean (true show, false hide)
+   * - hideAll: if true, hide all by default (byId can override)
+   * @example
+   * { byId: { name: true, internal: false }, hideAll: false }
    */
   initialColumnVisibility?: InitialColumnVisibilityConfig
+  /**
+   * Field-level overrides for filtering/searching metadata.
+   * @example
+   * { amount: { type: 'number', label: 'Amount ($)' } }
+   */
   fieldOverrides?: FieldOverrides<TData>
+  /**
+   * Partial style tokens merged into the active variant.
+   */
   customStyles?: PartialTableStyles
+  /**
+   * Swap any internal UI piece (buttons, popovers, etc.).
+   * @default {}
+   */
   uiComponents?: DataTableUIComponents
+  /**
+   * Legacy alias for uiComponents. If provided, overrides take precedence over uiComponents.
+   */
+  customUIComponents?: DataTableUIComponents
+  /**
+   * Replace built-in icons with your own set.
+   */
   icons?: DataTableIcons
+  /**
+   * Optional stable id to isolate table state in the store.
+   * @example
+   * storeId="users-table"
+   */
   storeId?: string
 
   // Row interaction
+  /**
+   * Row click handler. If omitted, selection is managed internally.
+   * @example
+   * onRowClick={(row) => setActive(row)}
+   */
   onRowClick?: (row: TData) => void
+  /**
+   * Control the selected row externally.
+   * @default null
+   */
   selectedRow?: TData | null
+  /**
+   * When true, arrow-key navigation will promote highlight to selection.
+   * @default true
+   */
   autoSelect?: boolean
 
   // Expandable functionality
+  /**
+   * Enable expand/collapse per row.
+   * @default false
+   */
   expandable?: boolean
+  /**
+   * Controlled expansion state by row id.
+   * @default {}
+   */
   expandedRows?: Record<string, boolean>
+  /**
+   * Called when a row should toggle expansion (controlled mode).
+   */
   onToggleExpand?: (row: TData) => void
+  /**
+   * Notifies parent with the new expanded rows map.
+   */
   onExpansionChange?: (expandedRows: Record<string, boolean>) => void
+  /**
+   * Render content below a row when expanded.
+   * @example
+   * renderExpandedContent={(row) => <Details row={row} />}
+   */
   renderExpandedContent?: (row: TData) => React.ReactNode
   /**
-   * If true, expanded row content in table mode will be clamped to the
-   * scroll container width rather than spanning the full table content width.
+   * Clamp expanded content width to the scroll container in table mode.
+   * @default true
    */
   clampExpandedContentToContainer?: boolean
   /**
-   * If true, custom static rows will be clamped to the scroll container width.
+   * Clamp custom static rows to the scroll container width.
+   * @default true
    */
   clampStaticRowsToContainer?: boolean
 
   // Custom rendering
+  /**
+   * Custom element rendered at the right of the header row.
+   */
   headerRightElement?: React.ReactNode
+  /**
+   * Custom renderer for grid/masonry items.
+   */
   customRenderGridItem?: (row: TData, index: number, isSelected: boolean) => React.ReactNode
+  /**
+   * Extra rows rendered at the top of the tbody.
+   * @default []
+   */
   customStaticRows?: React.ReactNode[]
+  /**
+   * When true, custom static rows stick below the header.
+   * @default true
+   */
   customStaticRowsSticky?: boolean
 
   // Text and labels
+  /**
+   * Placeholder text for the search input.
+   * @default "Search..."
+   */
   searchPlaceholder?: string
+  /**
+   * Text displayed when there are no rows to show.
+   * @default "No items found"
+   */
   emptyStateText?: string
+  /**
+   * Loading indicator text.
+   * @default "Loading..."
+   */
   loadingText?: string
+  /**
+   * Global loading state for the table.
+   * @default false
+   */
   isLoading?: boolean
 
   // Layout configuration
+  /**
+   * Visual layout and feature toggles for header/search/visibility, etc.
+   * See `DataTableLayout` for per-field defaults.
+   * @default {}
+   * @example
+   * { displayMode: 'grid', showSearchBar: false }
+   */
   layout?: DataTableLayout
+  /**
+   * Enable pagination and configure page size.
+   * If omitted, the table uses infinite or full rendering.
+   * @example
+   * { pageSize: 50 }
+   */
   paginationConfig?: DataTablePaginationConfig
+  /**
+   * Configure infinite or adaptive scrolling behavior.
+   * @example
+   * { enabled: true, pageSize: 50, increment: 25 }
+   */
   infiniteScrollConfig?: InfiniteScrollConfig
 
   // Feature toggles
+  /**
+   * Allow dragging column headers to reorder.
+   * @default true
+   */
   enableColumnDrag?: boolean
+  /**
+   * Allow resizing columns by dragging header edges.
+   * @default true
+   */
   enableColumnResize?: boolean
+  /**
+   * Timing config for resize interactions.
+   * @default { doubleClickDelay: 150, resetDebounce: 50 }
+   */
   resizeTimingConfig?: ResizeTimingConfig
 }
 
@@ -123,25 +278,48 @@ export interface DataTableProps<TData> {
  * Layout configuration for the DataTable
  */
 export interface DataTableLayout {
+  /** Show the search input above the table. @default true */
   showSearchBar?: boolean
+  /** Show the header area (search, settings, etc.). @default true */
   showHeader?: boolean
+  /** Show the table header row (column labels). @default true */
   showTableHeaders?: boolean
+  /** Show the column visibility/settings control. @default true */
   showColumnVisibility?: boolean
+  /** Show the filters button. @default true */
   showFilterButton?: boolean
+  /** Show a reset button inside settings popover. @default false */
   showResetTableButtonInSettings?: boolean
+  /** Rendering mode. @default 'table' */
   displayMode?: 'table' | 'grid' | 'masonry'
-  gridColumns?: number // If > 0, shows exactly this many columns. If 0 or undefined, uses responsive auto-fit with gridItemMinWidth
+  /**
+   * If > 0, render exactly this many grid columns.
+   * If 0/undefined, use responsive auto-fit with gridItemMinWidth.
+   */
+  gridColumns?: number
+  /** Minimum grid item width for responsive auto-fit. @default 250 */
   gridItemMinWidth?: number
-  masonryColumns?: number // If > 0, shows exactly this many columns. If 0 or undefined, uses responsive auto-fit with masonryItemMinWidth
+  /** If > 0, render exactly this many masonry columns. */
+  masonryColumns?: number
+  /** Minimum masonry item width for responsive auto-fit. @default 300 */
   masonryItemMinWidth?: number
-  masonryGap?: number // Gap between items in pixels
+  /** Gap between items in pixels. @default 16 */
+  masonryGap?: number
 }
 
 /**
  * Pagination configuration
  */
 export interface DataTablePaginationConfig {
+  /**
+   * Whether to auto-fit page size to the viewport.
+   * (Behavior depends on the consuming UI.)
+   */
   autoFit?: boolean
+  /**
+   * Items per page. If omitted, falls back to infiniteScrollConfig.pageSize or STANDARD_PAGE_SIZE (25).
+   * @default 25
+   */
   pageSize?: number
 }
 
@@ -149,12 +327,21 @@ export interface DataTablePaginationConfig {
  * Infinite scrolling configuration (unified for both regular and adaptive)
  */
 export interface InfiniteScrollConfig {
+  /** Enable infinite scrolling. @default false */
   enabled?: boolean
-  adaptive?: boolean // Whether to use adaptive infinite scrolling instead of regular
-  loadThreshold?: number // Distance from viewport edge to trigger loading (in pixels)
-  pageSize?: number // Number of items per page/load (defaults to STANDARD_PAGE_SIZE)
-  increment?: number // Number of items to load when scrolling (defaults to INFINITE_SCROLL_INCREMENT)
-  maxItems?: number // Maximum number of items to keep in memory for adaptive scrolling (defaults to pageSize * 3)
+  /** Use adaptive windowed scrolling instead of regular. @default false */
+  adaptive?: boolean
+  /** Distance from viewport edge to trigger load (px). @default 100 */
+  loadThreshold?: number
+  /** Items per page/load. @default 25 */
+  pageSize?: number
+  /** Items to add per scroll step. @default 25 */
+  increment?: number
+  /**
+   * Max items to keep in memory (adaptive). Defaults to 3x pageSize or 3x viewport-estimated items.
+   * @default pageSize * 3 (when viewport unknown)
+   */
+  maxItems?: number
 }
 
 // ============================================================================
@@ -172,11 +359,17 @@ export type HeaderAlignment = 'left' | 'center' | 'right'
 export interface ColumnOverrides<TData = any> {
   [columnId: string]: {
     // Core properties
+    /** Show or hide the column. @default true */
     visible?: boolean                           // Show/hide column
+    /** Header content (string or render function). */
     header?: string | (() => React.ReactNode)  // Header content with full styling control
+    /** Cell renderer for full control. */
     cell?: (info: any) => React.ReactNode      // Cell content with full styling control
+    /** Header text and sort icon alignment. @default 'left' */
     headerAlignment?: HeaderAlignment          // Header text and sort icon alignment
+    /** Column-level styling (width, classes, etc.). @default {} */
     meta?: {                                    // Column-level styling (width, etc.)
+      /** Class applied to header and cells. */
       className?: string                        // Applied to both header and cells
       [key: string]: any
     }
@@ -194,7 +387,9 @@ export interface ColumnVisibilityOverrides {
  * Initial column visibility configuration used to set defaults on first render
  */
 export interface InitialColumnVisibilityConfig {
+  /** Map of columnId => visibility (true show, false hide). @default {} */
   byId?: { [columnId: string]: boolean }
+  /** Hide all columns by default (byId can opt-in). @default false */
   hideAll?: boolean
 }
 
@@ -203,20 +398,35 @@ export interface InitialColumnVisibilityConfig {
  */
 export interface FieldOverrides<TData = any> {
   [fieldId: string]: {
+    /** Enable as a filter field. @default true (if auto-generated) */
     filterable?: boolean
+    /** Enable as a search field. @default true (if auto-generated) */
     searchable?: boolean
+    /** Short label used in UI. */
     label?: string
+    /** Friendly display name shown to users. */
     displayName?: string
+    /** Data type guiding filter/search behavior. @example 'number' */
     type?: FilterDataType
+    /** Help text shown in tooltips/docs. */
     description?: string
+    /** Custom accessor path or resolver. @example (row) => row.profile.name */
     path?: string | ((item: TData) => any)
+    /** Alternate field names to search. @example ['full_name','name'] */
     aliases?: string[]
+    /** Preferred categorical values to suggest. */
     preferredValues?: string[]
+    /** Default numeric value for comparison filters. */
     defaultNumericValue?: number
+    /** Default operator for numeric/date filters. @example '>=' */
     defaultOperator?: '>' | '<' | '>=' | '<=' | '=' | '!=' | '*' | '!*'
+    /** Whether numeric values are percentages. */
     isPercentage?: boolean
+    /** Suggested free-text value for search. */
     suggestedValue?: string
+    /** Include only in filters, exclude from search. @default false */
     filterOnly?: boolean
+    /** Include only in search, exclude from filters. @default false */
     searchOnly?: boolean
   }
 }
@@ -238,18 +448,31 @@ export interface IconProps {
  * Icon overrides interface
  */
 export interface DataTableIcons {
+  /** Loading spinner for states. */
   Loader?: React.ComponentType<IconProps>
+  /** Prev page icon. */
   PaginationPrevious?: React.ComponentType<IconProps>
+  /** Next page icon. */
   PaginationNext?: React.ComponentType<IconProps>
+  /** Sort ascending indicator. */
   SortAscending?: React.ComponentType<IconProps>
+  /** Sort descending indicator. */
   SortDescending?: React.ComponentType<IconProps>
+  /** Unsorted indicator. */
   SortUnsorted?: React.ComponentType<IconProps>
+  /** Expand row icon. */
   ExpandIcon?: React.ComponentType<IconProps>
+  /** Collapse row icon. */
   CollapseIcon?: React.ComponentType<IconProps>
+  /** Clear filters icon. */
   ClearFilters?: React.ComponentType<IconProps>
+  /** Search icon. */
   Search?: React.ComponentType<IconProps>
+  /** Small X/close icon. */
   X?: React.ComponentType<IconProps>
+  /** Filters popover trigger icon. */
   Filter?: React.ComponentType<IconProps>
+  /** Column settings trigger icon. */
   ColumnSettings?: React.ComponentType<IconProps>
 }
 

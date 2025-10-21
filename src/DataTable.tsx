@@ -70,6 +70,7 @@ export function DataTable<TData>({
   fieldOverrides,
   customStyles,
   uiComponents = {},
+  customUIComponents = {},
   icons,
   storeId,
   onRowClick: onRowClickProp,
@@ -108,11 +109,17 @@ export function DataTable<TData>({
   const tableStyles = useTableStyles(customStyles)
   const effectiveIcons = useDataTableIcons(icons)
   
+  // Merge legacy customUIComponents alias with uiComponents (custom takes precedence)
+  const mergedUIComponents = useMemo(() => ({
+    ...uiComponents,
+    ...customUIComponents,
+  }), [uiComponents, customUIComponents])
+
   const {
     Button, 
     PaginationButton,
     ScrollArea,
-  } = uiComponents
+  } = mergedUIComponents
 
   const PaginationBtn = PaginationButton || Button || SimpleButton
   const ScrollAreaComponent = ScrollArea || SimpleScrollArea
@@ -238,6 +245,19 @@ export function DataTable<TData>({
   const pendingIndexRef = useRef<number | null>(null)
   
   const effectiveExpandedRows = onToggleExpand ? expandedRows : internalExpandedRows;
+
+  // Ensure custom ScrollArea viewports (e.g., Radix) allow horizontal and vertical scrolling
+  useEffect(() => {
+    const root = scrollAreaRef.current
+    if (!root) return
+    const viewport = root.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
+    if (viewport) {
+      try {
+        viewport.style.overflowX = 'auto'
+        viewport.style.overflowY = 'auto'
+      } catch {}
+    }
+  }, [mergedUIComponents])
 
   // Drag and drop state
   const [dragState, setDragState] = useState<DragState>(createDragState());
@@ -969,21 +989,20 @@ export function DataTable<TData>({
         }}
         headerRightElement={headerRightElement}
         filteredDataLength={filteredData.length}
-                table={table}
-                uiComponents={uiComponents}
+        table={table}
+                uiComponents={mergedUIComponents}
         tableStyles={tableStyles}
                 icons={effectiveIcons}
         onResetTable={handleResetTable}
       />
 
-      <div
-        ref={scrollAreaRef}
+      <ScrollAreaComponent
+        ref={scrollAreaRef as unknown as React.Ref<HTMLDivElement>}
         className={cn(
           tableStyles.table.scrollArea,
           displayMode === 'table' && effectiveDisplayRows.length === 0 && 'overflow-hidden'
         )}
       >
-        <ScrollAreaComponent>
         {(displayMode === 'grid' || displayMode === 'masonry') && null}
         {displayMode === 'grid' ? (
           <>
@@ -1259,8 +1278,7 @@ export function DataTable<TData>({
               )}
             </>
         )}
-        </ScrollAreaComponent>
-      </div>
+      </ScrollAreaComponent>
       
       <DataTablePagination
         table={table}

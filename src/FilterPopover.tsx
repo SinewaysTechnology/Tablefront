@@ -15,6 +15,7 @@ import {
   SimpleScrollArea
 } from './defaultUIComponents';
 
+/** Single filter option description. */
 interface FilterOption {
   id: string
   label: string
@@ -25,11 +26,20 @@ interface FilterOption {
   originalDisplay?: string
 }
 
+/**
+ * Filters popover for quickly toggling predefined filters.
+ * @example
+ * <FilterPopover filterStore={useMyFilterStore} />
+ */
 interface FilterPopoverProps {
   children?: ReactNode
+  /** Hook providing available filters and actions. */
   filterStore?: any
+  /** Override internal UI parts (Popover, Button, etc.). @default {} */
   uiComponents?: DataTableUIComponents
+  /** Icon overrides (Filter icon). */
   icons?: DataTableIcons
+  /** Utility class overrides for internal elements. @default {} */
   styles?: {
     trigger?: string
     triggerIcon?: string

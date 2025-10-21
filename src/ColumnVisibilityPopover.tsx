@@ -17,11 +17,20 @@ import {
   SimpleSettings02Icon
 } from './defaultUIComponents';
 
+/**
+ * Column visibility/settings popover.
+ * @example
+ * <ColumnVisibilityPopover table={table} showResetButton onResetTable={reset} />
+ */
 interface ColumnVisibilityPopoverProps {
   table: Table<unknown>
+  /** Additional classes for the trigger button. */
   className?: string
+  /** Override internal UI parts (Popover, Button, Switch, etc.). @default {} */
   uiComponents?: DataTableUIComponents
+  /** Override the settings icon. */
   icons?: DataTableIcons
+  /** Utility class overrides for internal elements. @default {} */
   styles?: {
     trigger?: string
     triggerIcon?: string
@@ -32,7 +41,9 @@ interface ColumnVisibilityPopoverProps {
     item?: string
     checkbox?: string
   }
+  /** Show a "Reset table" button in the popover. @default false */
   showResetButton?: boolean
+  /** Called when the reset button is clicked. */
   onResetTable?: () => void
 }
 

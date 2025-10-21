@@ -26,7 +26,7 @@ export const defaultTableStyles: PartialTableStyles = {
   table: {
     scrollArea: "w-full flex-1 min-h-0 overflow-auto",
     table: "w-full caption-bottom text-sm bg-foreground/2",
-    tableHeader: "h-10 sticky top-0 z-20 bg-background border-b border-border shadow-sm",
+    tableHeader: "h-10 sticky top-0 bg-background border-b border-border shadow-sm",
     tableRow: "border-b h-10",
     tableRowSelected: "bg-primary/10 hover:bg-primary/10",
     tableRowHover: "hover:bg-foreground/5",
@@ -155,7 +155,7 @@ export const modernTableStyles: PartialTableStyles = {
   table: {
     scrollArea: "w-full flex-1 min-h-0 bg-card/20 overflow-auto",
     table: "w-full text-sm",
-    tableHeader: "sticky top-0 z-10 bg-gradient-to-b from-card/90 to-card/70 backdrop-blur-md border-b border-border shadow-md",
+    tableHeader: "sticky top-0 bg-gradient-to-b from-card/90 to-card/70 backdrop-blur-md border-b border-border shadow-md",
     tableRow: "border-b border-border/50 cursor-pointer transition-all duration-200",
     tableRowSelected: "bg-gradient-to-r from-primary/5 via-primary/15 to-primary/5 hover:from-primary/10 hover:via-primary/25 hover:to-primary/10 shadow-lg",
     tableRowHover: "hover:bg-gradient-to-r hover:from-accent/40 hover:via-accent/60 hover:to-accent/40",
@@ -283,7 +283,7 @@ export const compactTableStyles: PartialTableStyles = {
   table: {
     scrollArea: "w-full flex-1 min-h-0 overflow-auto",
     table: "w-full text-xs",
-    tableHeader: "sticky top-0 z-10 bg-muted/50 border-b border-border backdrop-blur-md",
+    tableHeader: "sticky top-0 bg-muted/50 border-b border-border backdrop-blur-md",
     tableRow: "border-b transition-colors cursor-pointer",
     tableRowSelected: "bg-primary/10 hover:bg-primary/15",
     tableRowHover: "hover:bg-muted/30",
