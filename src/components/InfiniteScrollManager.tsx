@@ -1,14 +1,19 @@
-"use client"
+'use client'
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { PaginationState } from "@tanstack/react-table";
-import { INFINITE_SCROLL_INCREMENT, SCROLL_THRESHOLD } from "../constants/pagination";
-import { useAdaptiveInfiniteScroll } from "../hooks/useAdaptiveInfiniteScroll";
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { PaginationState } from '@tanstack/react-table'
+import { INFINITE_SCROLL_INCREMENT, SCROLL_THRESHOLD } from '../constants/pagination'
+import { getScrollElement } from '../utils/scrollElement'
+import { useWindowedRows } from '../hooks/useWindowedRows'
 
-import type { InfiniteScrollConfig } from "../types/DataTableTypes";
+import type { InfiniteScrollConfig } from '../types/DataTableTypes'
 
 interface UseInfiniteScrollManagerParams<TData> {
+  /** Filtered (unsorted) rows — used for length checks in regular mode. */
   normalRows: TData[]
+  /** Sorted + filtered full list (pre-pagination). */
+  sortedRows: TData[]
+  /** Currently paginated/sorted slice from TanStack (regular infinite scroll grows into this). */
   displayRows: TData[]
   scrollAreaRef: React.RefObject<HTMLDivElement | null>
   pagination: PaginationState
@@ -17,10 +22,13 @@ interface UseInfiniteScrollManagerParams<TData> {
   isUsingPagination: boolean
   displayMode: 'table' | 'grid' | 'masonry'
   windowSize?: { width: number; height: number }
+  /** Fingerprint for window resets (filter/sort/data identity). */
+  listResetKey?: string
 }
 
 export function useInfiniteScrollManager<TData>({
   normalRows,
+  sortedRows,
   displayRows,
   scrollAreaRef,
   pagination,
@@ -29,141 +37,186 @@ export function useInfiniteScrollManager<TData>({
   isUsingPagination,
   displayMode,
   windowSize,
+  listResetKey,
 }: UseInfiniteScrollManagerParams<TData>) {
-  // Determine adaptive availability
-  const isAdaptiveEnabled = !!(infiniteScrollConfig?.enabled && infiniteScrollConfig?.adaptive && displayMode !== 'masonry')
+  const wantsInfinite = !!infiniteScrollConfig?.enabled && !isUsingPagination
+  const wantsDomVirtualization =
+    !isUsingPagination &&
+    displayMode !== 'masonry' &&
+    !!(
+      infiniteScrollConfig?.virtualized ||
+      infiniteScrollConfig?.adaptive ||
+      wantsInfinite
+    )
 
-  // Adaptive infinite scrolling
+  // Progressive loading only when the consumer opts into sizing knobs.
+  // With just `{ enabled: true }` (no pageSize / increment / maxItems), show everything.
+  const hasProgressiveSizing =
+    (typeof infiniteScrollConfig?.pageSize === 'number' &&
+      infiniteScrollConfig.pageSize > 0) ||
+    (typeof infiniteScrollConfig?.increment === 'number' &&
+      infiniteScrollConfig.increment > 0) ||
+    (typeof infiniteScrollConfig?.maxItems === 'number' &&
+      infiniteScrollConfig.maxItems > 0)
+
+  // Full list: explicit `fullList`, or default when no progressive sizing is configured.
+  // `fullList: false` keeps the old growing-pageSize behavior even without knobs.
+  const wantsFullList =
+    wantsInfinite &&
+    (infiniteScrollConfig?.fullList === true ||
+      (infiniteScrollConfig?.fullList !== false && !hasProgressiveSizing))
+
+  // Sliding window: caps scrollHeight so the thumb stays usable.
+  const maxItems = infiniteScrollConfig?.maxItems
+  const wantsWindowed =
+    wantsInfinite &&
+    !wantsFullList &&
+    typeof maxItems === 'number' &&
+    maxItems > 0 &&
+    displayMode !== 'masonry'
+
+  // Growing pageSize when infinite is on and we're not using full-list or windowed mode.
+  const shouldEnableGrowingScroll =
+    wantsInfinite && !wantsFullList && !wantsWindowed
+
+  const loadThreshold = infiniteScrollConfig?.loadThreshold ?? SCROLL_THRESHOLD
+
   const {
-    virtualData: adaptiveVirtualData,
-    isLoadingMore: adaptiveIsLoadingMore,
-    isLoadingLess: adaptiveIsLoadingLess,
-    isEnabled: adaptiveScrollEnabled,
-  } = useAdaptiveInfiniteScroll({
-    data: normalRows,
+    windowRows,
+    isLoadingMore: windowIsLoadingMore,
+    isLoadingLess: windowIsLoadingLess,
+    isEnabled: windowEnabled,
+  } = useWindowedRows({
+    data: sortedRows,
     scrollAreaRef,
-    pagination,
-    setPagination,
-    config: isAdaptiveEnabled ? infiniteScrollConfig : undefined,
-    isUsingPagination,
+    enabled: wantsWindowed,
+    pageSize: infiniteScrollConfig?.pageSize,
+    increment: infiniteScrollConfig?.increment,
+    maxItems: maxItems ?? 0,
+    loadThreshold,
+    estimateSize: infiniteScrollConfig?.estimateSize,
+    listResetKey,
   })
 
-  // Regular infinite scrolling state
   const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const loadingLockRef = useRef(false)
+  const paginationRef = useRef(pagination)
+  const normalRowsLengthRef = useRef(normalRows.length)
 
-  // Check if we should enable regular infinite scrolling (when adaptive is disabled)
-  const shouldEnableInfiniteScroll = !isUsingPagination && !isAdaptiveEnabled && !!infiniteScrollConfig?.enabled && !infiniteScrollConfig?.adaptive
+  paginationRef.current = pagination
+  normalRowsLengthRef.current = normalRows.length
 
-  // Regular infinite scrolling loader
   const loadMoreItems = useCallback(() => {
-    if (isLoadingMore || !shouldEnableInfiniteScroll) return
+    if (!shouldEnableGrowingScroll || loadingLockRef.current) return
 
+    const { pageIndex, pageSize } = paginationRef.current
+    const total = normalRowsLengthRef.current
+    const currentlyShowing = (pageIndex + 1) * pageSize
+    if (currentlyShowing >= total) return
+
+    loadingLockRef.current = true
     setIsLoadingMore(true)
 
-    const currentPageSize = pagination.pageSize
-    const currentPageIndex = pagination.pageIndex
-    const currentlyShowing = (currentPageIndex + 1) * currentPageSize
     const increment = infiniteScrollConfig?.increment || INFINITE_SCROLL_INCREMENT
+    setPagination((prev: PaginationState) => ({
+      ...prev,
+      pageSize: prev.pageSize + increment,
+    }))
 
-    if (currentlyShowing < normalRows.length) {
-      setPagination((prev: PaginationState) => ({
-        ...prev,
-        pageSize: prev.pageSize + increment,
-      }))
-      requestAnimationFrame(() => {
-        setIsLoadingMore(false)
-      })
-    } else {
+    requestAnimationFrame(() => {
+      loadingLockRef.current = false
       setIsLoadingMore(false)
-    }
-  }, [normalRows.length, pagination.pageIndex, pagination.pageSize, setPagination, isLoadingMore, shouldEnableInfiniteScroll, infiniteScrollConfig?.increment])
+    })
+  }, [shouldEnableGrowingScroll, setPagination, infiniteScrollConfig?.increment])
 
-  // rAF-based scroll checking system (no hardcoded delays)
   useEffect(() => {
-    if (!scrollAreaRef.current || !shouldEnableInfiniteScroll) return
+    if (!shouldEnableGrowingScroll) return
 
-    const scrollElement = (scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement) || scrollAreaRef.current
+    const scrollElement = getScrollElement(scrollAreaRef)
     if (!scrollElement) return
 
-    const rafIdRef = { current: 0 as number | null }
-    const needsCheckRef = { current: false }
+    let rafId: number | null = null
+    let needsCheck = false
 
     const runCheck = () => {
-      rafIdRef.current = null
-      if (isLoadingMore) return
+      rafId = null
+      needsCheck = false
+      if (loadingLockRef.current) return
 
       const { scrollTop, scrollHeight, clientHeight } = scrollElement
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const { pageIndex, pageSize } = paginationRef.current
+      const currentlyShowing = (pageIndex + 1) * pageSize
 
-      // Trigger load-more when near bottom
-      if (distanceFromBottom < SCROLL_THRESHOLD) {
+      if (distanceFromBottom < loadThreshold) {
+        loadMoreItems()
+      } else if (
+        currentlyShowing < normalRowsLengthRef.current &&
+        scrollHeight <= clientHeight
+      ) {
         loadMoreItems()
       }
 
-      // Initial fill: if content shorter than viewport, try to load more
-      const currentlyShowing = (pagination.pageIndex + 1) * pagination.pageSize
-      if (currentlyShowing < normalRows.length && !isLoadingMore) {
-        if (scrollHeight <= clientHeight) {
-          loadMoreItems()
-        }
-      }
-
-      // If another check is pending (due to bursty scroll events), schedule again
-      if (needsCheckRef.current) {
-        needsCheckRef.current = false
-        rafIdRef.current = requestAnimationFrame(runCheck)
+      if (needsCheck) {
+        rafId = requestAnimationFrame(runCheck)
       }
     }
 
     const onScroll = () => {
-      needsCheckRef.current = true
-      if (!rafIdRef.current) {
-        rafIdRef.current = requestAnimationFrame(runCheck)
+      needsCheck = true
+      if (rafId == null) {
+        rafId = requestAnimationFrame(runCheck)
       }
     }
 
-    // Listen to scroll events, but process in rAF
     scrollElement.addEventListener('scroll', onScroll, { passive: true })
-
-    // Kick an initial rAF check once mounted
-    rafIdRef.current = requestAnimationFrame(runCheck)
+    rafId = requestAnimationFrame(runCheck)
 
     return () => {
       scrollElement.removeEventListener('scroll', onScroll)
-      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+      if (rafId != null) cancelAnimationFrame(rafId)
     }
-  }, [loadMoreItems, isLoadingMore, shouldEnableInfiniteScroll, scrollAreaRef, pagination.pageIndex, pagination.pageSize, normalRows.length])
+  }, [loadMoreItems, shouldEnableGrowingScroll, scrollAreaRef, loadThreshold])
 
-  // Re-check on window resize using rAF
   useEffect(() => {
-    if (!scrollAreaRef.current || !shouldEnableInfiniteScroll) return
-    const el = (scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement) || scrollAreaRef.current
-    if (!el) return
-    const run = () => {
-      const { scrollTop, scrollHeight, clientHeight } = el
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      if (distanceFromBottom < SCROLL_THRESHOLD) {
-        loadMoreItems()
-      }
-      const currentlyShowing = (pagination.pageIndex + 1) * pagination.pageSize
-      if (currentlyShowing < normalRows.length && !isLoadingMore && scrollHeight <= clientHeight) {
-        loadMoreItems()
-      }
-    }
-    const id = requestAnimationFrame(run)
-    return () => cancelAnimationFrame(id)
-  }, [windowSize, shouldEnableInfiniteScroll, scrollAreaRef, loadMoreItems, isLoadingMore, pagination.pageIndex, pagination.pageSize, normalRows.length])
+    if (!shouldEnableGrowingScroll || !windowSize) return
 
-  const effectiveDisplayRows = adaptiveScrollEnabled ? adaptiveVirtualData : displayRows
-  const effectiveIsLoadingMore = adaptiveScrollEnabled ? adaptiveIsLoadingMore : isLoadingMore
+    const scrollElement = getScrollElement(scrollAreaRef)
+    if (!scrollElement) return
+
+    const id = requestAnimationFrame(() => {
+      if (loadingLockRef.current) return
+      const { scrollTop, scrollHeight, clientHeight } = scrollElement
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const { pageIndex, pageSize } = paginationRef.current
+      const currentlyShowing = (pageIndex + 1) * pageSize
+
+      if (
+        distanceFromBottom < loadThreshold ||
+        (currentlyShowing < normalRowsLengthRef.current && scrollHeight <= clientHeight)
+      ) {
+        loadMoreItems()
+      }
+    })
+
+    return () => cancelAnimationFrame(id)
+  }, [windowSize, shouldEnableGrowingScroll, scrollAreaRef, loadMoreItems, loadThreshold])
+
+  const effectiveDisplayRows = wantsFullList
+    ? sortedRows
+    : windowEnabled
+      ? windowRows
+      : displayRows
+
+  const effectiveIsLoadingMore = windowEnabled ? windowIsLoadingMore : isLoadingMore
 
   return {
     effectiveDisplayRows,
     effectiveIsLoadingMore,
-    adaptiveIsLoadingLess: adaptiveScrollEnabled ? adaptiveIsLoadingLess : undefined,
-    adaptiveScrollEnabled,
-    shouldEnableInfiniteScroll: shouldEnableInfiniteScroll || adaptiveScrollEnabled,
+    isLoadingLess: windowEnabled ? windowIsLoadingLess : undefined,
+    isVirtualizationEnabled: wantsDomVirtualization,
+    isFullListVirtualization: wantsFullList,
+    shouldEnableInfiniteScroll:
+      shouldEnableGrowingScroll || wantsWindowed || wantsFullList,
   }
 }
-
-

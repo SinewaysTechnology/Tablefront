@@ -41,10 +41,12 @@ interface ColumnVisibilityPopoverProps {
     item?: string
     checkbox?: string
   }
-  /** Show a "Reset table" button in the popover. @default false */
+  /** Show a reset-to-defaults button in the popover. @default true */
   showResetButton?: boolean
   /** Called when the reset button is clicked. */
   onResetTable?: () => void
+  /** Reset button label. @default "Reset to defaults" */
+  resetLabel?: string
 }
 
 export const ColumnVisibilityPopover = ({
@@ -53,8 +55,9 @@ export const ColumnVisibilityPopover = ({
   uiComponents = {},
   icons,
   styles = {},
-  showResetButton = false,
-  onResetTable
+  showResetButton = true,
+  onResetTable,
+  resetLabel = 'Reset to defaults',
 }: ColumnVisibilityPopoverProps) => {
   const [open, setOpen] = useState(false)
   
@@ -102,44 +105,38 @@ export const ColumnVisibilityPopover = ({
   const visibleColumnsCount = allColumns.filter(column => columnVisibility[column.id] !== false).length
   const areAllVisible = allColumns.every(column => columnVisibility[column.id] !== false)
   
-  // Memoize callback functions to prevent recreation
+  // Always write explicit true/false — never delete keys (missing ≠ reliable default)
   const toggleColumnVisibility = useCallback((columnId: string) => {
-    const currentVisibility = table.getState().columnVisibility;
-    const isCurrentlyVisible = currentVisibility[columnId] !== false;
-    const newState = { ...currentVisibility };
-    
-    if (isCurrentlyVisible) {
-      newState[columnId] = false;
-    } else {
-      delete newState[columnId];
-    }
-    
-    table.setColumnVisibility(newState);
-    table.getRowModel();
+    const currentVisibility = table.getState().columnVisibility
+    const isCurrentlyVisible = currentVisibility[columnId] !== false
+    const newState: Record<string, boolean> = { ...currentVisibility }
+
+    // Ensure every hideable column has an explicit boolean before toggling
+    table.getAllColumns()
+      .filter((column) => column.getCanHide())
+      .forEach((column) => {
+        if (newState[column.id] === undefined) {
+          newState[column.id] = currentVisibility[column.id] !== false
+        }
+      })
+
+    newState[columnId] = !isCurrentlyVisible
+    table.setColumnVisibility(newState)
   }, [table])
   
   const toggleAllColumns = useCallback(() => {
-    const currentVisibility = table.getState().columnVisibility;
-    const currentColumns = table.getAllColumns().filter(column => column.getCanHide());
-    const currentAllVisible = currentColumns.every(column => currentVisibility[column.id] !== false);
-    const newState = { ...currentVisibility };
-    
-    if (currentAllVisible) {
-      currentColumns.forEach(column => {
-        newState[column.id] = false;
-      });
-    } else {
-      // Explicitly mark all as visible to avoid empty state which would
-      // re-trigger initialColumnVisibility defaults
-      currentColumns.forEach(column => {
-        newState[column.id] = true;
-      });
-    }
-    
-    table.setColumnVisibility(newState);
-    setTimeout(() => {
-      table.getRowModel();
-    }, 0);
+    const currentVisibility = table.getState().columnVisibility
+    const currentColumns = table.getAllColumns().filter((column) => column.getCanHide())
+    const currentAllVisible = currentColumns.every(
+      (column) => currentVisibility[column.id] !== false,
+    )
+    const newState: Record<string, boolean> = { ...currentVisibility }
+
+    currentColumns.forEach((column) => {
+      newState[column.id] = !currentAllVisible
+    })
+
+    table.setColumnVisibility(newState)
   }, [table])
 
   // Memoize popover content className to prevent recalculation
@@ -243,20 +240,21 @@ export const ColumnVisibilityPopover = ({
             })}
           </div>
 
-          {showResetButton && (
+          {showResetButton && onResetTable && (
             <>
               <Separator />
               <div className="pt-2">
                 <ResetButton
                   type="button"
-                  className="w-full text-xs"
+                  className="w-full h-9 text-sm"
+                  aria-label={resetLabel}
                   onClick={(e) => {
                     e.stopPropagation()
-                    onResetTable?.()
+                    onResetTable()
                     setOpen(false)
                   }}
                 >
-                  Reset table
+                  {resetLabel}
                 </ResetButton>
               </div>
             </>

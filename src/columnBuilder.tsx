@@ -170,9 +170,10 @@ export function applySmartSizing<TData>(
         ...existingMeta,
         style: {
           ...existingMeta.style,
+          // Prefer width/minWidth only — omit maxWidth so unlocked columns can
+          // grow and fill the table when the viewport is wider than content.
           width: `${width}px`,
           minWidth: `${width}px`,
-          maxWidth: `${width}px`
         }
       }
     };

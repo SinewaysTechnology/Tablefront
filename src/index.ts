@@ -10,7 +10,12 @@ export { useInfiniteScrollManager } from './components/InfiniteScrollManager'
 
 export { DefaultIcons, useDataTableIcons } from './icons'
 
-export { applyColumnOverrides, applyColumnVisibilityOverrides } from './ColumnEditor'
+export {
+  applyColumnOverrides,
+  applyColumnVisibilityOverrides,
+  buildDefaultColumnVisibility,
+  isColumnWidthLocked,
+} from './ColumnEditor'
 
 export { createDataTable, createAutoDataTable, createSimpleDataTable } from './stores/createDataTable'
 export type { CreateDataTableConfig, DataTableSetup } from './stores/createDataTable'
@@ -43,11 +48,10 @@ export {
 
 export { DEFAULT_RESIZE_DOUBLE_CLICK_DELAY, DEFAULT_RESIZE_RESET_DEBOUNCE } from './constants/resize'
 
-// Licensing
+// Licensing — side-effect import is injected into dist entry (see tsup.config.ts).
+// `tablefront activate` overwrites dist/license.globals.* with validated tokens.
 export { useLicenseStatus } from './licensing'
 export { LicenseEnforcer } from './components/LicenseEnforcer'
-
-// Globals are injected and imported in dist at build/activate time
 
 // Export all types from the centralized types file
 export type {
@@ -57,6 +61,7 @@ export type {
   DataTableProps,
   DataTableLayout,
   DataTablePaginationConfig,
+  InfiniteScrollConfig,
   
   // Column and field types
   HeaderAlignment,

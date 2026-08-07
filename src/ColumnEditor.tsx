@@ -4,7 +4,7 @@ import React from 'react'
 // Header alignment options
 export type HeaderAlignment = 'left' | 'center' | 'right'
 
-// Simplified column override system - 5 essential props for maximum flexibility
+// Simplified column override system
 export interface ColumnOverrides<TData = any> {
   [columnId: string]: {
     // Core properties
@@ -12,12 +12,32 @@ export interface ColumnOverrides<TData = any> {
     header?: string | (() => React.ReactNode)  // Header content with full styling control
     cell?: (info: any) => React.ReactNode      // Cell content with full styling control
     headerAlignment?: HeaderAlignment          // Header text and sort icon alignment
+    /**
+     * Lock column width — hides the resize handle and ignores user resize/store widths.
+     * Pair with `width` or `meta.style` width/minWidth/maxWidth.
+     */
+    lockWidth?: boolean
+    /** Convenience fixed width (number = px). Applied when set; use with `lockWidth`. */
+    width?: number | string
     meta?: {                                    // Column-level styling (width, etc.)
       className?: string                        // Applied to both header and cells
+      lockWidth?: boolean
       [key: string]: any
     }
   }
 }
+
+export const isColumnWidthLocked = <TData,>(
+  columnOverrides: ColumnOverrides<TData> | undefined,
+  columnId: string,
+): boolean => {
+  const override = columnOverrides?.[columnId]
+  if (!override) return false
+  return override.lockWidth === true || override.meta?.lockWidth === true
+}
+
+const toCssWidth = (width: number | string): string =>
+  typeof width === 'number' ? `${width}px` : width
 
 /**
  * Applies simplified column overrides with 4 essential props
@@ -59,13 +79,39 @@ export function applyColumnOverrides<TData>(
     }
     
     // Handle meta - merge with existing
-    if (override.meta) {
-      const existingMeta = (updatedCol.meta as { [key: string]: unknown } | undefined) || {};
-      updatedCol.meta = {
-        ...existingMeta,
-        ...override.meta
-      };
+    const existingMeta = (updatedCol.meta as {
+      className?: string
+      style?: React.CSSProperties
+      lockWidth?: boolean
+      [key: string]: unknown
+    } | undefined) || {}
+
+    const nextMeta = {
+      ...existingMeta,
+      ...(override.meta || {}),
+      style: {
+        ...(existingMeta.style || {}),
+        ...((override.meta?.style as React.CSSProperties | undefined) || {}),
+      },
     }
+
+    if (override.width !== undefined) {
+      const cssWidth = toCssWidth(override.width)
+      nextMeta.style = {
+        ...nextMeta.style,
+        width: cssWidth,
+        minWidth: cssWidth,
+        maxWidth: cssWidth,
+      }
+    }
+
+    if (override.lockWidth === true || override.meta?.lockWidth === true) {
+      nextMeta.lockWidth = true
+      // TanStack flag (harmless if unused); documents non-resizable intent
+      ;(updatedCol as { enableResizing?: boolean }).enableResizing = false
+    }
+
+    updatedCol.meta = nextMeta
     
     return updatedCol;
   });
@@ -74,6 +120,54 @@ export function applyColumnOverrides<TData>(
 // Separate interface for simple visibility overrides
 export interface ColumnVisibilityOverrides {
   [columnId: string]: boolean
+}
+
+export type InitialColumnVisibilityLike = {
+  byId?: { [columnId: string]: boolean }
+  hideAll?: boolean
+}
+
+const getColumnId = <TData,>(col: ColumnDef<TData, any>): string =>
+  col.id || String(((col as { accessorKey?: string })?.accessorKey) || '')
+
+/**
+ * Resolve the configured default visibility preset.
+ * Order: hideAll baseline → initialColumnVisibility.byId → columnOverrides.visible
+ */
+export function buildDefaultColumnVisibility<TData>(
+  columns: ColumnDef<TData, any>[],
+  initialColumnVisibility?: InitialColumnVisibilityLike,
+  columnOverrides: ColumnOverrides<TData> = {},
+): Record<string, boolean> {
+  const byId = initialColumnVisibility?.byId ?? {}
+  const hideAll = initialColumnVisibility?.hideAll === true
+  const next: Record<string, boolean> = {}
+
+  for (const col of columns) {
+    const columnId = getColumnId(col)
+    if (!columnId) continue
+    next[columnId] = hideAll ? false : true
+  }
+
+  for (const [columnId, visible] of Object.entries(byId)) {
+    next[columnId] = visible
+  }
+
+  for (const [columnId, override] of Object.entries(columnOverrides)) {
+    if (override?.visible !== undefined) {
+      next[columnId] = override.visible
+    }
+  }
+
+  // Columns that cannot be hidden stay visible
+  for (const col of columns) {
+    const columnId = getColumnId(col)
+    if (columnId && (col as { enableHiding?: boolean }).enableHiding === false) {
+      next[columnId] = true
+    }
+  }
+
+  return next
 }
 
 /**
@@ -106,4 +200,4 @@ export function applyColumnVisibilityOverrides<TData>(
   });
   
   return enforced;
-} 
+}

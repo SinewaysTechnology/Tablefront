@@ -27,7 +27,18 @@ export interface TableState {
   columnOrder: ColumnOrderState
   columnWidths: ColumnWidthState
   // Selectors
-  getState: () => Omit<TableState, 'getState' | 'resetTableState' | 'setSorting' | 'setPagination' | 'setColumnVisibility' | 'setColumnOrder' | 'setColumnWidth' | 'resetColumnWidth'>
+  getState: () => Omit<
+    TableState,
+    | 'getState'
+    | 'resetTableState'
+    | 'resetToDefaults'
+    | 'setSorting'
+    | 'setPagination'
+    | 'setColumnVisibility'
+    | 'setColumnOrder'
+    | 'setColumnWidth'
+    | 'resetColumnWidth'
+  >
   // Actions
   setSorting: UpdaterFn<SortingState>
   setPagination: UpdaterFn<PaginationState>
@@ -36,6 +47,11 @@ export interface TableState {
   setColumnWidth: (columnId: string, width: number) => void
   resetColumnWidth: (columnId: string) => void
   resetTableState: () => void
+  /**
+   * Atomic reset of persisted table chrome to defaults.
+   * Visibility is set explicitly (never left empty) so override presets stick.
+   */
+  resetToDefaults: (defaultColumnVisibility: VisibilityState) => void
 }
 
 export interface TableStoreConfig {
@@ -80,12 +96,12 @@ export function createTableStore(options: TableStoreConfig) {
   
   const initialState = createInitialState(initialColumnVisibility, initialPageSize)
   
-  // Helper function to reset pagination
+  // Reset to first page but keep pageSize.
+  // Infinite scroll grows pageSize; wiping it on sort/visibility changes feels broken.
   const resetPagination = (state: TableState) => ({
     pagination: {
       ...state.pagination,
       pageIndex: 0,
-      pageSize: initialPageSize
     }
   })
   
@@ -97,7 +113,18 @@ export function createTableStore(options: TableStoreConfig) {
         // Selector to get current state (useful for memoization in components)
         getState: () => {
           const state = get()
-          const { getState, resetTableState, setSorting, setPagination, setColumnVisibility, setColumnOrder, setColumnWidth, resetColumnWidth, ...rest } = state
+          const {
+            getState,
+            resetTableState,
+            resetToDefaults,
+            setSorting,
+            setPagination,
+            setColumnVisibility,
+            setColumnOrder,
+            setColumnWidth,
+            resetColumnWidth,
+            ...rest
+          } = state
           return rest
         },
         
@@ -179,6 +206,21 @@ export function createTableStore(options: TableStoreConfig) {
         },
           
         resetTableState: () => set(initialState),
+
+        resetToDefaults: (defaultColumnVisibility: VisibilityState) => {
+          const currentPageSize = get().pagination?.pageSize || initialPageSize
+          // One write. Always set the resolved preset (never `{}`).
+          set({
+            sorting: [],
+            columnOrder: [],
+            columnWidths: {},
+            columnVisibility: { ...defaultColumnVisibility },
+            pagination: {
+              pageIndex: 0,
+              pageSize: currentPageSize,
+            },
+          })
+        },
       }),
       {
         name,

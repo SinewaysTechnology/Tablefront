@@ -12,11 +12,16 @@ import {
   removeDropIndicator,
   createResizeState,
   applyResizeCursor,
-  getColumnWidth,
   applyColumnWidthToDomImmediate,
   clearColumnStyles,
-  RESIZE_CONSTRAINTS,
+  clampColumnWidth,
+  lockTableResizeLayout,
+  applyLockedColumnResize,
+  measureColumnWidthFromPointer,
+  cssLengthToPx,
+  type ResizeLayoutLock,
 } from './utils'
+import { buildDefaultColumnVisibility, isColumnWidthLocked } from './ColumnEditor'
 import { 
   useTableStyles
 } from './variants'
@@ -35,6 +40,7 @@ import { DataMasonry } from './components/DataMasonry';
 import { useDataTableState } from './hooks/useDataTableState';
 import { useDataTableSearch } from './hooks/useDataTableSearch';
 import { useInfiniteScrollManager } from './components/InfiniteScrollManager';
+import { useDataTableVirtualizer } from './hooks/useDataTableVirtualizer';
 
 // Import only the types actually used in this component
 import type {
@@ -92,6 +98,7 @@ export function DataTable<TData>({
   searchPlaceholder = 'Search...',
   emptyStateText = 'No items found',
   loadingText = 'Loading...',
+  labels,
   isLoading = false,
 
   layout = {},
@@ -162,12 +169,11 @@ export function DataTable<TData>({
     resetInProgress,
     setResetInProgress,
     resizeEndTimeoutRef,
-    setTableRefreshKey,
     setPagination,
     setColumnOrder,
     columnOrder,
     pagination,
-    resetTableState,
+    resetToDefaults,
   } = useDataTableState({
       data, 
     columns,
@@ -208,27 +214,29 @@ export function DataTable<TData>({
     parentContainerRef,
   })
   
-  // Central reset handler for settings popover
+  // Live width overrides so React doesn't snap back to stale meta styles before store persist
+  const [widthOverrides, setWidthOverrides] = useState<Record<string, number>>({})
+
+  // Reset = one store write with the configured preset. Idempotent on repeat clicks.
   const handleResetTable = useCallback(() => {
-    // Reset store-managed table state
-    resetTableState?.()
+    const defaults = buildDefaultColumnVisibility(
+      effectiveColumns,
+      initialColumnVisibility,
+      columnOverrides,
+    )
 
-    // Reset all column widths (store and DOM)
-    try {
-      effectiveColumns.forEach(col => {
-        const accessorKey = (col as { accessorKey?: string })?.accessorKey
-        const columnId = (col.id || String(accessorKey || '')) as string
-        if (columnId) {
-          resetColumnWidth(columnId)
-          clearColumnStyles(columnId)
-        }
-      })
-    } catch {}
-
-    // Clear filters and search
-    try { handleClearFilters() } catch {}
-    try { handleClearSearch() } catch {}
-  }, [resetTableState, effectiveColumns, resetColumnWidth, handleClearFilters, handleClearSearch])
+    resetToDefaults(defaults)
+    setWidthOverrides({})
+    handleClearFilters()
+    handleClearSearch()
+  }, [
+    effectiveColumns,
+    initialColumnVisibility,
+    columnOverrides,
+    resetToDefaults,
+    handleClearFilters,
+    handleClearSearch,
+  ])
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   
   const windowSize = useWindowResize();
@@ -331,15 +339,39 @@ export function DataTable<TData>({
     return !!effectiveExpandedRows[rowId];
   }, [effectiveExpandedRows, idField]);
 
-  // Centralized infinite scroll manager (regular + adaptive) with rAF
+  // Sorted + filtered full list (pre-pagination) for windowed / full-list modes.
+  const prePaginationRows = table.getPrePaginationRowModel().rows
+  const sortedRows = useMemo(
+    () => prePaginationRows.map((row: { original: TData }) => row.original),
+    [prePaginationRows],
+  )
+
+  const listResetKey = useMemo(() => {
+    const sortingKey = JSON.stringify(table.getState().sorting)
+    const mid = sortedRows[Math.floor(sortedRows.length / 2)] as TData | undefined
+    const first = sortedRows[0] as TData | undefined
+    const last = sortedRows[sortedRows.length - 1] as TData | undefined
+    return [
+      sortedRows.length,
+      String(first?.[idField] ?? ''),
+      String(mid?.[idField] ?? ''),
+      String(last?.[idField] ?? ''),
+      sortingKey,
+      storeSearchValue,
+      filters.length,
+    ].join('|')
+  }, [sortedRows, idField, table, storeSearchValue, filters.length])
+
+  // Growing pageSize / sliding window + DOM virtualization flags
   const {
     effectiveDisplayRows,
     effectiveIsLoadingMore,
-    adaptiveIsLoadingLess,
-    adaptiveScrollEnabled,
+    isLoadingLess,
+    isVirtualizationEnabled,
     shouldEnableInfiniteScroll,
   } = useInfiniteScrollManager({
     normalRows,
+    sortedRows,
     displayRows,
     scrollAreaRef,
     pagination,
@@ -348,6 +380,53 @@ export function DataTable<TData>({
     isUsingPagination,
     displayMode,
     windowSize,
+    listResetKey,
+  })
+
+  const [virtualScrollMargin, setVirtualScrollMargin] = useState(0)
+
+  useEffect(() => {
+    const headerH = headerRef.current?.offsetHeight || 0
+    let stickyH = 0
+    if (customStaticRowsSticky && customStaticRows && customStaticRows.length > 0) {
+      const tableEl = scrollAreaRef.current?.querySelector('table') as HTMLElement | null
+      if (tableEl) {
+        tableEl.querySelectorAll('tbody tr[data-static="true"]').forEach((row) => {
+          stickyH += (row as HTMLElement).offsetHeight || 0
+        })
+      }
+    }
+    headerHeightRef.current = headerH
+    stickyStaticRowsHeightRef.current = stickyH
+    setVirtualScrollMargin(headerH + stickyH)
+  }, [
+    customStaticRowsSticky,
+    customStaticRows,
+    effectiveDisplayRows.length,
+    showTableHeaders,
+    displayMode,
+  ])
+
+  const getVirtualItemKey = useCallback(
+    (index: number) => {
+      const row = effectiveDisplayRows[index]
+      if (!row) return index
+      return String(row[idField])
+    },
+    [effectiveDisplayRows, idField],
+  )
+
+  const rowVirtualizer = useDataTableVirtualizer({
+    enabled: isVirtualizationEnabled && displayMode === 'table',
+    count: effectiveDisplayRows.length,
+    scrollAreaRef,
+    estimateSize: infiniteScrollConfig?.estimateSize ?? 40,
+    overscan: infiniteScrollConfig?.overscan ?? 8,
+    getItemKey: getVirtualItemKey,
+    // thead/static rows are in document flow — don't offset item starts.
+    scrollMargin: 0,
+    scrollPaddingStart: virtualScrollMargin,
+    measureExpandedSibling: expandable,
   })
 
   const scrollToTop = useCallback(() => {
@@ -532,6 +611,10 @@ export function DataTable<TData>({
             }, 120)
 
             window.requestAnimationFrame(() => {
+              if (isVirtualizationEnabled && displayMode === 'table') {
+                rowVirtualizer.scrollToIndex(target, { align: 'auto' })
+              }
+
               if (scrollAreaRef.current) {
                 const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
                 const scrollContainer = viewport || scrollAreaRef.current
@@ -550,7 +633,7 @@ export function DataTable<TData>({
         })
       }
     }
-      }, [effectiveDisplayRows, onRowClick, selectedId, idField, scrollAreaRef, expandable, effectiveExpandedRows, onToggleExpand, onExpansionChange, internalExpandedRows, isUsingPagination, table, scrollToTop, scrollToBottom, highlightIndex]);
+      }, [effectiveDisplayRows, onRowClick, selectedId, idField, scrollAreaRef, expandable, effectiveExpandedRows, onToggleExpand, onExpansionChange, internalExpandedRows, isUsingPagination, table, scrollToTop, scrollToBottom, highlightIndex, isVirtualizationEnabled, displayMode, rowVirtualizer]);
 
   useEffect(() => {
     return () => {
@@ -781,7 +864,7 @@ export function DataTable<TData>({
    * Handles double-click to reset column width to automatic sizing
    */
   const handleResizeReset = useCallback((e: React.MouseEvent, columnId: string) => {
-    if (!enableColumnResize) return;
+    if (!enableColumnResize || isColumnWidthLocked(columnOverrides, columnId)) return;
     
     e.preventDefault();
     e.stopPropagation();
@@ -802,6 +885,12 @@ export function DataTable<TData>({
       applyResizeCursor(false);
     }
     
+    setWidthOverrides((prev) => {
+      if (!(columnId in prev)) return prev
+      const { [columnId]: _removed, ...rest } = prev
+      return rest
+    })
+
     // Check if there's actually a stored width to reset
     const hasStoredWidth = columnWidths[columnId]?.isUserSet;
     
@@ -828,49 +917,149 @@ export function DataTable<TData>({
       clearColumnStyles(columnId);
     }
     
-    // Force table recalculation
-    setTableRefreshKey(prev => prev + 1);
-    
     // Clear the reset flag
     setTimeout(() => setResetInProgress(false), resizeResetDebounce);
-      }, [enableColumnResize, resetColumnWidth, setTableRefreshKey, resizeState.isResizing, columnWidths, effectiveColumns, resizeResetDebounce]);
+      }, [enableColumnResize, resetColumnWidth, resizeState.isResizing, columnWidths, effectiveColumns, resizeResetDebounce, columnOverrides]);
+
+  // Cached layout lock + pending width for the active resize drag
+  const resizeSessionRef = useRef<{
+    headerCell: HTMLElement | null
+    lock: ResizeLayoutLock | null
+    lastWidth: number
+    /** pointerX - columnRight at drag start (hitslop grab correction) */
+    edgeOffset: number
+    rafId: number | null
+  }>({ headerCell: null, lock: null, lastWidth: 0, edgeOffset: 0, rafId: null })
+
+  const tableContentWidth = useMemo(() => {
+    if (!enableColumnResize) return undefined
+
+    let sum = expandable ? 40 : 0
+    const visibleColumns = table.getVisibleLeafColumns()
+
+    for (const column of visibleColumns) {
+      const columnId = column.id
+      const override = widthOverrides[columnId]
+      if (typeof override === 'number' && override > 0) {
+        sum += override
+        continue
+      }
+
+      const meta = column.columnDef.meta as { style?: React.CSSProperties } | undefined
+      const fromStyle = cssLengthToPx(meta?.style?.width)
+      if (fromStyle > 0) {
+        sum += fromStyle
+        continue
+      }
+
+      const fromSize = column.columnDef.size
+      if (typeof fromSize === 'number' && fromSize > 0) {
+        sum += fromSize
+        continue
+      }
+
+      sum += column.getSize()
+    }
+
+    return sum > 0 ? Math.ceil(sum) : undefined
+  }, [enableColumnResize, expandable, table, widthOverrides, columnWidths, effectiveColumns, columnVisibility])
 
   /**
    * Handles the start of a column resize operation
    */
   const handleResizeStart = useCallback((e: React.MouseEvent, columnId: string) => {
-    if (!enableColumnResize || e.detail === 2 || resetInProgress) return;
+    if (
+      !enableColumnResize ||
+      e.detail === 2 ||
+      resetInProgress ||
+      isColumnWidthLocked(columnOverrides, columnId)
+    ) {
+      return
+    }
     
     e.preventDefault();
     e.stopPropagation();
     
     const headerCell = e.currentTarget.closest('th') as HTMLElement;
     if (!headerCell) return;
+
+    // Pin lockWidth columns (and expand gutter) so viewport-fill never stretches them
+    const headerRow = headerCell.parentElement
+    const lockedIndexes: number[] = []
+    if (headerRow) {
+      Array.from(headerRow.children).forEach((cell, index) => {
+        const columnIdAttr = (cell as HTMLElement).getAttribute('data-column-id')
+        if (!columnIdAttr) {
+          // Expand-column gutter — treat as pinned
+          lockedIndexes.push(index)
+          return
+        }
+        if (isColumnWidthLocked(columnOverrides, columnIdAttr)) {
+          lockedIndexes.push(index)
+          return
+        }
+        const metaLock = (
+          table.getColumn(columnIdAttr)?.columnDef.meta as { lockWidth?: boolean } | undefined
+        )?.lockWidth
+        if (metaLock) lockedIndexes.push(index)
+      })
+    }
+
+    const lock = lockTableResizeLayout(headerCell, { lockedIndexes })
+    const startRect = headerCell.getBoundingClientRect()
+    const startWidth = lock
+      ? (lock.widths[lock.activeIndex] ?? startRect.width)
+      : startRect.width
+    // Keep the grab point on the hitslop aligned with the column's right edge
+    const edgeOffset = e.clientX - startRect.right
+
+    resizeSessionRef.current = {
+      headerCell,
+      lock,
+      lastWidth: startWidth,
+      edgeOffset,
+      rafId: null,
+    }
     
     setResizeState({
       isResizing: true,
       columnId,
       startX: e.clientX,
-      startWidth: getColumnWidth(headerCell),
+      startWidth,
     });
     
     applyResizeCursor(true);
-  }, [enableColumnResize, resetInProgress]);
+  }, [enableColumnResize, resetInProgress, columnOverrides, table]);
 
   /**
-   * Handles mouse move during column resize
+   * Handles mouse move during column resize (rAF-coalesced).
+   * Width is measured from the column's live left edge → pointer, so left-side
+   * auto-reflow cannot desync the handle from the cursor.
    */
   const handleResizeMove = useCallback((e: MouseEvent) => {
     if (!resizeState.isResizing || !resizeState.columnId || resetInProgress) return;
-    
-    const deltaX = e.clientX - resizeState.startX;
-    const newWidth = Math.max(
-      RESIZE_CONSTRAINTS.MIN_WIDTH, 
-      Math.min(RESIZE_CONSTRAINTS.MAX_WIDTH, resizeState.startWidth + deltaX)
-    );
-    
-    // Apply width immediately for real-time feedback (no delay)
-    applyColumnWidthToDomImmediate(resizeState.columnId, newWidth);
+
+    const { headerCell, edgeOffset } = resizeSessionRef.current
+    if (!headerCell) return
+
+    const newWidth = measureColumnWidthFromPointer(e.clientX, headerCell, edgeOffset)
+    resizeSessionRef.current.lastWidth = newWidth;
+
+    if (resizeSessionRef.current.rafId != null) return
+
+    resizeSessionRef.current.rafId = requestAnimationFrame(() => {
+      resizeSessionRef.current.rafId = null
+      const { lock, lastWidth, headerCell: cell } = resizeSessionRef.current
+      if (lock) {
+        applyLockedColumnResize(lock, lastWidth)
+        return
+      }
+      if (!cell || !resizeState.columnId) return
+      applyColumnWidthToDomImmediate(resizeState.columnId, lastWidth, {
+        headerCell: cell,
+        includeBodyCells: false,
+      })
+    })
   }, [resizeState, resetInProgress]);
 
   /**
@@ -878,14 +1067,37 @@ export function DataTable<TData>({
    */
   const handleResizeEnd = useCallback((e: MouseEvent) => {
     if (!resizeState.isResizing || !resizeState.columnId || resetInProgress) return;
-    
-    const deltaX = e.clientX - resizeState.startX;
-    const finalWidth = Math.max(
-      RESIZE_CONSTRAINTS.MIN_WIDTH, 
-      Math.min(RESIZE_CONSTRAINTS.MAX_WIDTH, resizeState.startWidth + deltaX)
-    );
-    
-    const currentColumnId = resizeState.columnId;
+
+    if (resizeSessionRef.current.rafId != null) {
+      cancelAnimationFrame(resizeSessionRef.current.rafId)
+      resizeSessionRef.current.rafId = null
+    }
+
+    const { lock, headerCell, edgeOffset, lastWidth } = resizeSessionRef.current
+    const fromPointer = headerCell
+      ? measureColumnWidthFromPointer(e.clientX, headerCell, edgeOffset)
+      : clampColumnWidth(resizeState.startWidth + (e.clientX - resizeState.startX))
+    const finalWidth = lastWidth || fromPointer
+    const currentColumnId = resizeState.columnId
+
+    if (lock) {
+      applyLockedColumnResize(lock, finalWidth)
+      // Drop drag-time inline table width so `w-full` can fill the viewport again.
+      // Column min/max widths (incl. lockWidth) keep pinned columns from stretching.
+      lock.table.style.width = ''
+    } else {
+      applyColumnWidthToDomImmediate(currentColumnId, finalWidth, {
+        headerCell,
+        includeBodyCells: false,
+      })
+    }
+
+    // Keep the dragged width in React immediately so re-render cannot snap back
+    // before the delayed store persist (double-click cancel window).
+    setWidthOverrides((prev) => ({ ...prev, [currentColumnId]: finalWidth }))
+
+    resizeSessionRef.current.headerCell = null
+    resizeSessionRef.current.lock = null
     
     // Reset UI state immediately
     setResizeState(createResizeState());
@@ -899,6 +1111,11 @@ export function DataTable<TData>({
     // Delay persisting to store to detect potential double-click
     resizeEndTimeoutRef.current = setTimeout(() => {
       setColumnWidth(currentColumnId, finalWidth);
+      setWidthOverrides((prev) => {
+        if (!(currentColumnId in prev)) return prev
+        const { [currentColumnId]: _removed, ...rest } = prev
+        return rest
+      })
       resizeEndTimeoutRef.current = null;
     }, resizeDoubleClickDelay);
     
@@ -913,6 +1130,10 @@ export function DataTable<TData>({
       return () => {
         document.removeEventListener('mousemove', handleResizeMove);
         document.removeEventListener('mouseup', handleResizeEnd);
+        if (resizeSessionRef.current.rafId != null) {
+          cancelAnimationFrame(resizeSessionRef.current.rafId)
+          resizeSessionRef.current.rafId = null
+        }
       };
     }
   }, [resizeState.isResizing, handleResizeMove, handleResizeEnd]);
@@ -956,7 +1177,7 @@ export function DataTable<TData>({
   
 
   return (
-    <>
+    <div data-tablefront-root className="flex h-full min-h-0 w-full flex-1 flex-col">
       {globalDropZone}
       {globalResizeOverlay}
       <div 
@@ -989,6 +1210,7 @@ export function DataTable<TData>({
         }}
         headerRightElement={headerRightElement}
         filteredDataLength={filteredData.length}
+        labels={labels}
         table={table}
                 uiComponents={mergedUIComponents}
         tableStyles={tableStyles}
@@ -1027,8 +1249,12 @@ export function DataTable<TData>({
               customStaticRows={customStaticRows}
               customStaticRowsSticky={customStaticRowsSticky}
               isLoadingMore={effectiveIsLoadingMore}
-              isLoadingLess={adaptiveScrollEnabled ? adaptiveIsLoadingLess : undefined}
-              shouldEnableInfiniteScroll={shouldEnableInfiniteScroll || adaptiveScrollEnabled}
+              isLoadingLess={isLoadingLess}
+              shouldEnableInfiniteScroll={shouldEnableInfiniteScroll}
+              isVirtualized={isVirtualizationEnabled}
+              scrollAreaRef={scrollAreaRef}
+              estimateSize={infiniteScrollConfig?.estimateSize}
+              overscan={infiniteScrollConfig?.overscan}
               tableStyles={tableStyles}
               icons={effectiveIcons}
             />
@@ -1067,8 +1293,8 @@ export function DataTable<TData>({
               customStaticRows={customStaticRows}
               customStaticRowsSticky={customStaticRowsSticky}
               isLoadingMore={effectiveIsLoadingMore}
-              isLoadingLess={adaptiveScrollEnabled ? adaptiveIsLoadingLess : undefined}
-              shouldEnableInfiniteScroll={shouldEnableInfiniteScroll || adaptiveScrollEnabled}
+              isLoadingLess={isLoadingLess}
+              shouldEnableInfiniteScroll={shouldEnableInfiniteScroll}
               tableStyles={tableStyles}
               icons={effectiveIcons}
             />
@@ -1093,7 +1319,9 @@ export function DataTable<TData>({
                 )}
                 style={enableColumnResize ? { 
                   tableLayout: 'fixed',
-                  // minWidth: '100%'
+                  // minWidth keeps user sizes; width stays 100% (w-full) so unlocked
+                  // columns can still absorb leftover viewport space.
+                  minWidth: tableContentWidth ? `${tableContentWidth}px` : undefined,
                 } : undefined}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
@@ -1106,7 +1334,24 @@ export function DataTable<TData>({
                         {headerGroup.headers.map((header) => {
                           const canSort = header.column.getCanSort()
                           const sortDirection = header.column.getIsSorted()
-                          const meta = (header.column.columnDef.meta as { className?: string; style?: React.CSSProperties } | undefined) || {}
+                          const meta = (header.column.columnDef.meta as {
+                            className?: string
+                            style?: React.CSSProperties
+                            lockWidth?: boolean
+                          } | undefined) || {}
+                          const columnId = header.column.id || String(((header.column.columnDef as { accessorKey?: string })?.accessorKey) || '')
+                          const isWidthLocked =
+                            isColumnWidthLocked(columnOverrides, columnId) || !!meta.lockWidth
+                          const widthOverride = widthOverrides[header.column.id]
+                          const headerStyle =
+                            typeof widthOverride === 'number' && widthOverride > 0 && !isWidthLocked
+                              ? {
+                                  ...meta.style,
+                                  width: `${widthOverride}px`,
+                                  minWidth: `${widthOverride}px`,
+                                  maxWidth: `${widthOverride}px`,
+                                }
+                              : meta.style
                           
                           const sortIcon = canSort ? (
                             sortDirection === 'asc' ? (
@@ -1118,7 +1363,6 @@ export function DataTable<TData>({
                             )
                           ) : null
                           
-                          const columnId = header.column.id || String(((header.column.columnDef as { accessorKey?: string })?.accessorKey) || '')
                           const override = columnOverrides[columnId]
                           const headerAlignment = override?.headerAlignment || 'left'
                           
@@ -1168,7 +1412,7 @@ export function DataTable<TData>({
                                 enableColumnResize && "relative",
                                 meta.className
                               )}
-                              style={meta.style}
+                              style={headerStyle}
                             >
                               <SmartHeader
                                 text={(() => {
@@ -1215,7 +1459,9 @@ export function DataTable<TData>({
                                 headerAlignment={headerAlignment}
                               />
                               
-                              {enableColumnResize && showTableHeaders && (
+                              {enableColumnResize &&
+                                showTableHeaders &&
+                                !isColumnWidthLocked(columnOverrides, columnId) && (
                                 <div
                                   className={tableStyles.resize.hitslop}
                                   onMouseDown={(e) => handleResizeStart(e, columnId)}
@@ -1263,6 +1509,8 @@ export function DataTable<TData>({
                   clampExpandedContentToContainer={clampExpandedContentToContainer}
                   clampStaticRowsToContainer={clampStaticRowsToContainer}
                   scrollAreaRef={scrollAreaRef}
+                  rowVirtualizer={rowVirtualizer}
+                  isVirtualized={isVirtualizationEnabled && displayMode === 'table'}
                 />
               </table>
               {effectiveDisplayRows.length === 0 && !isLoading && (
@@ -1288,8 +1536,8 @@ export function DataTable<TData>({
         tableStyles={tableStyles}
         icons={effectiveIcons}
       />
+      </div>
     </div>
-    </>
   );
 }
 

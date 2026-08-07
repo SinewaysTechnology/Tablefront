@@ -1,9 +1,8 @@
 "use client"
 
-import React, { useEffect } from 'react'
+import React, { useLayoutEffect, useEffect, useState } from 'react'
 import { useLicenseStatus } from '../licensing'
 import { mountWatermarkTo, unmountWatermarkFrom } from '../watermark'
-// Ensure globals module executes when this component is bundled/loaded
 
 export type LicenseEnforcerProps = {
   containerRef: React.RefObject<HTMLElement | null>
@@ -12,20 +11,26 @@ export type LicenseEnforcerProps = {
 
 export function LicenseEnforcer ({ containerRef, watermarkText = 'Sineways Tablefront' }: LicenseEnforcerProps) {
   const license = useLicenseStatus()
+  const [container, setContainer] = useState<HTMLElement | null>(null)
+
+  // Re-read the ref when license state updates; refs are populated after commit
+  // and license resolution is async, so a single mount read is not enough.
+  useLayoutEffect(() => {
+    setContainer(containerRef.current)
+  }, [containerRef, license?.ready, license?.valid])
 
   useEffect(() => {
-    const container = containerRef.current
-    // console.log('Mounting' , license)
     if (!container || !license?.ready) return
+
     if (!license.valid) {
       mountWatermarkTo(container, watermarkText)
     } else {
       unmountWatermarkFrom(container)
     }
-    return () => { if (container) unmountWatermarkFrom(container) }
-  }, [license?.ready, license?.valid, containerRef, watermarkText])
 
-  // Log browser console error when license is missing or invalid
+    return () => { unmountWatermarkFrom(container) }
+  }, [license?.ready, license?.valid, container, watermarkText])
+
   useEffect(() => {
     if (!license?.ready) return
     if (license.valid) return
@@ -43,5 +48,3 @@ If you do not have a license key yet, you can purchase one at https://tablefront
 
   return null
 }
-
-

@@ -10,11 +10,12 @@ npm install @sineways/react-tablefront
 
 Licensing:
 ```bash
-# .env
+# .env (also reads .env.local / .env.production*)
 TABLEFRONT_LICENSE=your-license-key
 
-# package.json (ensure activation runs before your build)
+# package.json (activation must run before the framework build)
 "scripts": {
+  "dev": "tablefront activate && next dev",
   "build": "tablefront activate && next build"
 }
 ```
@@ -22,19 +23,15 @@ TABLEFRONT_LICENSE=your-license-key
 Notes:
 - If the key is missing or invalid, the build logs guidance and the library still works with a watermark.
 - No network calls are made at runtime; activation writes a tiny globals file consumed by the package.
+- Set `TABLEFRONT_LICENSE` as a build-time env var on hosts (Vercel, etc.). Running activate only on `next start` is too late for the client bundle.
 
-Minimal setup:
+Minimal setup (styles are auto-included — no CSS import needed):
 ```tsx
 import { DataTable } from '@sineways/react-tablefront'
 
 export default function UsersPage () {
   return <DataTable data={[]} />
 }
-```
-
-Minimal styles once globally:
-```ts
-import '@sineways/react-tablefront/styles.css'
 ```
 
 ## Features
@@ -485,7 +482,7 @@ const columnOverrides = {
 
 ## Licensing
 - Commercial license required
-- Activation via `.env` + build-time `tablefront activate`
+- Activation via `.env*` + build-time `tablefront activate` (build-time env required on hosts)
 - Library functions with watermark if key is missing/invalid; valid key removes watermark automatically
 
 ## Support & Pricing

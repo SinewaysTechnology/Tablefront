@@ -18,31 +18,44 @@ export function SmartHeader({
   headerAlignment 
 }: SmartHeaderProps) {
   const [showText, setShowText] = React.useState(true)
+  const wasResizingRef = React.useRef(false)
   
   // Check column width and update text visibility
   const checkWidth = React.useCallback(() => {
     const currentWidth = getCurrentColumnWidth(columnId)
     const shouldShow = shouldShowHeaderText(currentWidth)
-    setShowText(shouldShow)
+    setShowText((prev) => (prev === shouldShow ? prev : shouldShow))
   }, [columnId])
   
-  // Check width on mount, when resize state changes, and on window resize
+  // Remeasure after a resize drag ends (skip the start flip — width hasn't changed yet)
   React.useEffect(() => {
-    // Small delay to ensure DOM is updated
+    const isResizing = resizeState.isResizing
+    if (wasResizingRef.current && !isResizing) {
+      const timer = setTimeout(checkWidth, 0)
+      wasResizingRef.current = isResizing
+      return () => clearTimeout(timer)
+    }
+    wasResizingRef.current = isResizing
+  }, [checkWidth, resizeState.isResizing])
+
+  React.useEffect(() => {
     const timer = setTimeout(checkWidth, 0)
     return () => clearTimeout(timer)
-  }, [checkWidth, resizeState.isResizing])
+  }, [checkWidth])
   
   // Listen for window resize events to recheck header visibility
   React.useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
     const handleResize = () => {
-      // Debounce the resize check
-      const timer = setTimeout(checkWidth, 100)
-      return () => clearTimeout(timer)
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(checkWidth, 100)
     }
     
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      if (timer) clearTimeout(timer)
+    }
   }, [checkWidth])
   
   // If there's no text to show anyway, just render the icon

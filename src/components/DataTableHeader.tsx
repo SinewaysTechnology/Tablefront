@@ -37,6 +37,12 @@ export interface DataTableHeaderProps<TData> {
   // Header elements
   headerRightElement?: React.ReactNode
   filteredDataLength: number
+  /** Singular/plural labels for the result count and settings actions. */
+  labels?: {
+    result?: string
+    results?: string
+    resetToDefaults?: string
+  }
   
   // Table instance for column visibility
   table: any
@@ -88,11 +94,15 @@ export const DataTableHeader = React.memo(<TData,>({
   layout,
   headerRightElement,
   filteredDataLength,
+  labels,
   table,
   uiComponents,
   tableStyles,
   icons
 }: DataTableHeaderProps<TData>) => {
+  const resultLabel = labels?.result ?? 'Result'
+  const resultsLabel = labels?.results ?? 'Results'
+  const resetToDefaultsLabel = labels?.resetToDefaults ?? 'Reset to defaults'
   const internalSearchInputRef = useRef<HTMLInputElement>(null)
   const searchInputRef = externalSearchInputRef || internalSearchInputRef
   
@@ -189,7 +199,7 @@ export const DataTableHeader = React.memo(<TData,>({
       <div className={tableStyles.header.container}>
         <div className={tableStyles.header.leftSection}>
           <span className={tableStyles.header.resultCount}>
-            {`${filteredDataLength === 1 ? 'Result' : 'Results'}: ${filteredDataLength}`}
+            {`${filteredDataLength === 1 ? resultLabel : resultsLabel}: ${filteredDataLength}`}
           </span>
 
           {filterStore && filters.length > 0 && ClearFiltersBtn && (
@@ -214,8 +224,9 @@ export const DataTableHeader = React.memo(<TData,>({
               uiComponents={uiComponents}
               icons={icons}
               styles={tableStyles.columnVisibility}
-              showResetButton={!!layout.showResetTableButtonInSettings}
+              showResetButton={layout.showResetTableButtonInSettings !== false}
               onResetTable={onResetTable}
+              resetLabel={resetToDefaultsLabel}
             />
           )}
           {headerRightElement}
@@ -238,16 +249,21 @@ export const DataTableHeader = React.memo(<TData,>({
     tableStyles.columnVisibility,
     tableStyles.filterPopover,
     filteredDataLength,
+    resultLabel,
+    resultsLabel,
+    resetToDefaultsLabel,
     filterStore,
     filters.length,
     onClearFilters,
+    onResetTable,
     ClearFiltersBtn,
     icons.ClearFilters,
     table,
     tableState.columnVisibility, // Add table state to dependencies
     uiComponents,
     icons,
-    headerRightElement
+    headerRightElement,
+    layout.showResetTableButtonInSettings,
   ])
 
   return (

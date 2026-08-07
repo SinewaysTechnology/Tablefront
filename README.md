@@ -28,7 +28,7 @@ npm install @sineways/react-tablefront
 ### 2) Activate License (optional)
 Tablefront works without a key, but shows a small watermark. To remove it, provide a key and run activation at build time.
 
-Add your key to `.env`:
+Add your key to `.env` (or `.env.local` / `.env.production` — activation reads all of them):
 ```bash
 TABLEFRONT_LICENSE=your-license-key
 ```
@@ -37,22 +37,21 @@ Ensure activation runs during your build (example for Next.js):
 ```json
 {
   "scripts": {
+    "dev": "tablefront activate && next dev",
     "build": "tablefront activate && next build"
   }
 }
 ```
 
 Notes:
+- Activation must run **before** `next build` / `next dev` so the key is baked into the bundle. Running it only on `next start` is too late for the client bundle.
 - If the key is missing or invalid, the build prints guidance and the library still works with a watermark.
 - No runtime calls are made; activation writes a small globals file used by the components.
+- Hosting providers: set `TABLEFRONT_LICENSE` as a build-time environment variable (not only a runtime secret).
 
-### 3) Global Styles
-Import the package stylesheet once in your app entry:
-```ts
-import '@sineways/react-tablefront/styles.css'
-```
+### 3) Basic Usage
+Styles are bundled and applied automatically when you import the package — no CSS import required.
 
-### 4) Basic Usage
 ```tsx
 import { DataTable } from '@sineways/react-tablefront'
 
@@ -68,6 +67,11 @@ function UsersPage () {
     />
   )
 }
+```
+
+Optional: if your bundler strips CSS side-effects, import styles once:
+```ts
+import '@sineways/react-tablefront/styles.css'
 ```
 
 ## API Reference
@@ -246,8 +250,6 @@ Also available: `DefaultIcons`, `useDataTableIcons()` hook.
 - Pass `customStyles` to override any style slot. See `PartialTableStyles` in `variants` for structure.
 - Presets: `defaultTableStyles`, `modernTableStyles`, `compactTableStyles`
 - Helpers: `useTableStyles(customStyles)`, `tableStylePresets`, `getTableStylePreset('modern')`
-- Optional global defaults: `import '@sineways/react-tablefront/tailwind.css'`
-
 Example preset usage:
 ```ts
 import { DataTable, modernTableStyles } from '@sineways/react-tablefront'

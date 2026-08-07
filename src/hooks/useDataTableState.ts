@@ -6,7 +6,12 @@ import { createSelectionHook } from '../stores/createEntityStore'
 import { createEntityFilterStore } from '../stores/createFilterStore'
 import { buildFields } from '../fieldBuilder'
 import { quickColumns, applySmartSizing } from '../columnBuilder'
-import { applyColumnOverrides, applyColumnVisibilityOverrides } from '../ColumnEditor'
+import {
+  applyColumnOverrides,
+  applyColumnVisibilityOverrides,
+  buildDefaultColumnVisibility,
+  isColumnWidthLocked,
+} from '../ColumnEditor'
 import { generateStableStoreId, getFirstField } from '../utils/tableUtils'
 import { STANDARD_PAGE_SIZE } from '../constants/pagination'
 import type { 
@@ -107,7 +112,8 @@ export function useDataTableState<TData>({
     setColumnOrder,
     setColumnWidth,
     resetColumnWidth,
-    resetTableState
+    resetTableState,
+    resetToDefaults,
   } = tableStore()
 
   // ============================================================================
@@ -183,12 +189,24 @@ export function useDataTableState<TData>({
     // Apply smart sizing first, then override with manual resize widths
     let result = applySmartSizing(visibleColumns, data)
     
-    // Apply stored user-resized column widths
+    // Apply stored user-resized column widths (skip width-locked columns)
     if (enableColumnResize) {
       result = result.map(col => {
         const columnId = col.id || String(((col as { accessorKey?: string })?.accessorKey) || '')
+        const existingMeta = (col.meta as { style?: React.CSSProperties; lockWidth?: boolean } | undefined) || {}
+
+        if (isColumnWidthLocked(columnOverrides, columnId) || existingMeta.lockWidth) {
+          return {
+            ...col,
+            meta: {
+              ...existingMeta,
+              lockWidth: true,
+              isManuallyResized: false,
+            },
+          } as ColumnDef<TData, any>
+        }
+
         const columnWidthInfo = columnWidths[columnId]
-        const existingMeta = (col.meta as { style?: React.CSSProperties } | undefined) || {}
         
         // Check if column has been manually resized with valid width
         const isManuallyResized = columnWidthInfo?.isUserSet && 
@@ -230,44 +248,23 @@ export function useDataTableState<TData>({
     return result
   }, [columns, data, idField, columnOverrides, enableColumnResize, columnWidths])
 
+  const defaultColumnVisibility = useMemo(
+    () => buildDefaultColumnVisibility(effectiveColumns, initialColumnVisibility, columnOverrides),
+    [effectiveColumns, initialColumnVisibility, columnOverrides],
+  )
+
+  // Persist empty/`{}` only means "never customized" → use the configured preset.
+  // After reset we always write the full preset, so a second reset is idempotent.
   const columnVisibility = useMemo(() => {
-    // Start from scratch when there's no persisted visibility
     if (Object.keys(rawColumnVisibility).length === 0) {
-      const next: Record<string, boolean> = {}
-
-      const byId = initialColumnVisibility?.byId || {}
-      const hideAll = initialColumnVisibility?.hideAll === true
-
-      if (hideAll) {
-        // Hide all columns first
-        effectiveColumns.forEach(col => {
-          const colId = col.id || String(((col as { accessorKey?: string })?.accessorKey) || '')
-          if (colId) next[colId] = false
-        })
-      }
-
-      // Overlay explicit byId entries
-      Object.keys(byId).forEach(id => {
-        next[id] = byId[id]
-      })
-
-      // Apply true-only overrides (but do not force-show hidden ones unless asked)
-      Object.keys(columnOverrides).forEach(columnId => {
-        const override = columnOverrides[columnId]
-        if (override && override.visible !== undefined && override.visible !== false) {
-          if (next[columnId] === undefined) {
-            next[columnId] = override.visible
-          }
-        }
-      })
-
-      return applyColumnVisibilityOverrides(next, effectiveColumns, {})
+      return defaultColumnVisibility
     }
-
-    // If we have persisted visibility, continue using it with safeguards
-    const persisted = { ...rawColumnVisibility }
-    return applyColumnVisibilityOverrides(persisted, effectiveColumns, {})
-  }, [rawColumnVisibility, effectiveColumns, JSON.stringify(columnOverrides), JSON.stringify(initialColumnVisibility)])
+    return applyColumnVisibilityOverrides(
+      { ...rawColumnVisibility },
+      effectiveColumns,
+      {},
+    )
+  }, [rawColumnVisibility, effectiveColumns, defaultColumnVisibility])
 
   // (removed effect-based initialization to keep logic simple and render-synchronous)
 
@@ -391,7 +388,6 @@ export function useDataTableState<TData>({
   const [resizeState, setResizeState] = useState<ResizeState>(createResizeState())
   const [resetInProgress, setResetInProgress] = useState(false)
   const resizeEndTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const [tableRefreshKey, setTableRefreshKey] = useState(0)
 
   // ============================================================================
   // AUTO-SELECTION LOGIC
@@ -512,6 +508,7 @@ export function useDataTableState<TData>({
     // Columns
     effectiveColumns,
     columnVisibility,
+    defaultColumnVisibility,
     columnWidths,
     columnOrder,
     setColumnWidth,
@@ -531,8 +528,6 @@ export function useDataTableState<TData>({
     resetInProgress,
     setResetInProgress,
     resizeEndTimeoutRef,
-    tableRefreshKey,
-    setTableRefreshKey,
     
     // Store actions
     setSorting,
@@ -540,5 +535,6 @@ export function useDataTableState<TData>({
     setColumnVisibility,
     setColumnOrder,
     resetTableState,
+    resetToDefaults,
   }
 } 

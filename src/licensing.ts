@@ -4,35 +4,83 @@ import { useEffect, useState } from 'react'
 
 export type LicenseStatus = { valid: boolean, ready: boolean }
 
-// No client-side validation calls; activation writes globals ahead of time
+type LicenseGlobals = {
+  token: string
+  key: string
+}
+
+const readGlobalLicense = (): LicenseGlobals => {
+  const g = globalThis as any
+  const token = typeof g.__TABLEFRONT_VALIDATION_TOKEN === 'string'
+    ? g.__TABLEFRONT_VALIDATION_TOKEN
+    : ''
+  const key = typeof g.__TABLEFRONT_VALIDATION_KEY === 'string'
+    ? g.__TABLEFRONT_VALIDATION_KEY
+    : ''
+  return { token, key }
+}
+
+const applyModuleGlobals = (mod: any): LicenseGlobals => {
+  const token = typeof mod?.TABLEFRONT_VALIDATION_TOKEN === 'string'
+    ? mod.TABLEFRONT_VALIDATION_TOKEN
+    : ''
+  const key = typeof mod?.TABLEFRONT_VALIDATION_KEY === 'string'
+    ? mod.TABLEFRONT_VALIDATION_KEY
+    : ''
+
+  if (token && typeof globalThis !== 'undefined') {
+    ;(globalThis as any).__TABLEFRONT_VALIDATION_TOKEN = token
+  }
+  if (key && typeof globalThis !== 'undefined') {
+    ;(globalThis as any).__TABLEFRONT_VALIDATION_KEY = key
+  }
+
+  return {
+    token: token || readGlobalLicense().token,
+    key: key || readGlobalLicense().key,
+  }
+}
+
+const loadLicenseGlobals = async (): Promise<LicenseGlobals> => {
+  const existing = readGlobalLicense()
+  if (existing.token) return existing
+
+  // Prefer eager inclusion so Next.js does not park activation in an async chunk
+  // that can resolve after we already decided the license is invalid.
+  try {
+    const mod = await import(
+      /* webpackMode: "eager" */
+      './license.globals.mjs'
+    )
+    return applyModuleGlobals(mod)
+  } catch {
+    return readGlobalLicense()
+  }
+}
 
 export function useLicenseStatus (): LicenseStatus {
   const [status, setStatus] = useState<LicenseStatus>({ valid: false, ready: false })
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
+    let cancelled = false
+
+    ;(async () => {
       try {
-        // Ensure globals are loaded in source builds (no-op if missing)
-        try { await import('../dist/license.globals.mjs') } catch {}
+        const { token } = await loadLicenseGlobals()
+        if (cancelled) return
 
-        // Read globals
-        let token: string | undefined = (globalThis as any).__TABLEFRONT_VALIDATION_TOKEN
-        let publicKeyB64u: string | undefined = (globalThis as any).__TABLEFRONT_VALIDATION_KEY
-
-        // If globals are missing, mark as ready=false->true with valid=false
-        if (!token || !publicKeyB64u) {
-          if (!cancelled) setStatus({ valid: false, ready: true })
+        // Public key is unused for client-side watermark checks; token.valid is enough.
+        if (!token) {
+          setStatus({ valid: false, ready: true })
           return
         }
 
-        // Derive validity by decoding JWT payload ({ valid: true })
-        const derivedValid = getJwtValidFlag(token)
-        if (!cancelled) setStatus({ valid: derivedValid, ready: true })
+        setStatus({ valid: getJwtValidFlag(token), ready: true })
       } catch {
         if (!cancelled) setStatus({ valid: false, ready: true })
       }
     })()
+
     return () => { cancelled = true }
   }, [])
 
@@ -66,5 +114,3 @@ function base64UrlToBase64 (b64u: string): string {
   else if (pad !== 0) s += '=='
   return s
 }
-
-

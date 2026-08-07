@@ -412,6 +412,7 @@ export const SimplePopoverContent = React.memo<{
 
   return createPortal(
     <div
+      data-tablefront-root
       ref={context.contentRef}
       style={style}
       className={cn(

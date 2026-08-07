@@ -4,6 +4,7 @@ import React, { useCallback, useRef, useEffect, useState } from 'react'
 import { flexRender } from '@tanstack/react-table'
 import { cn } from '../utils'
 import type { DataTableIcons } from '../types/DataTableTypes'
+import { useDataTableVirtualizer } from '../hooks/useDataTableVirtualizer'
 
 /**
  * Props for the DataGrid component
@@ -40,10 +41,14 @@ export interface DataGridProps<TData> {
   customStaticRows?: React.ReactNode[]
   customStaticRowsSticky?: boolean
   
-  // Infinite scroll
+  // Infinite scroll / virtualization
   isLoadingMore: boolean
   isLoadingLess?: boolean
   shouldEnableInfiniteScroll: boolean
+  isVirtualized?: boolean
+  scrollAreaRef?: React.RefObject<HTMLDivElement | null>
+  estimateSize?: number
+  overscan?: number
   
   // Styling
   tableStyles: {
@@ -92,13 +97,19 @@ export function DataGrid<TData>({
   isLoadingMore,
   isLoadingLess,
   shouldEnableInfiniteScroll,
+  isVirtualized = false,
+  scrollAreaRef,
+  estimateSize = 160,
+  overscan = 6,
   tableStyles,
   icons
 }: DataGridProps<TData>) {
   const gridContainerRef = useRef<HTMLDivElement>(null)
   const staticRef = useRef<HTMLDivElement>(null)
-  const [staticHeight, setStaticHeight] = useState<number | undefined>(undefined)
+  const [staticHeight, setStaticHeight] = useState<number>(0)
   const [computedColumns, setComputedColumns] = useState<number>(1)
+  const fallbackScrollRef = useRef<HTMLDivElement | null>(null)
+  const effectiveScrollRef = scrollAreaRef ?? fallbackScrollRef
 
   useEffect(() => {
     const measure = () => {
@@ -123,8 +134,34 @@ export function DataGrid<TData>({
     onToggleExpand(row, e)
   }, [onToggleExpand])
 
+  const getVirtualItemKey = useCallback(
+    (index: number) => {
+      const row = displayRows[index]
+      if (!row) return index
+      return String(row[idField])
+    },
+    [displayRows, idField],
+  )
+
+  const gridVirtualizer = useDataTableVirtualizer({
+    enabled: isVirtualized && !!scrollAreaRef,
+    count: displayRows.length,
+    scrollAreaRef: effectiveScrollRef,
+    estimateSize,
+    overscan,
+    getItemKey: getVirtualItemKey,
+    scrollMargin: staticHeight,
+    lanes: Math.max(1, computedColumns),
+    gap: 4,
+  })
+
   // Render grid item component
-  const renderGridItem = useCallback((rowData: TData, index: number) => {
+  const renderGridItem = useCallback((
+    rowData: TData,
+    index: number,
+    measureRef?: (node: Element | null) => void,
+    style?: React.CSSProperties,
+  ) => {
     const isSelected = selectedId !== null && String(rowData[idField]) === String(selectedId)
     const scrubbingActive = highlightedId !== null && String(highlightedId) !== String(selectedId)
     const isHighlighted = highlightedId !== null && String(rowData[idField]) === String(highlightedId)
@@ -132,8 +169,12 @@ export function DataGrid<TData>({
     // Use custom renderer if provided
     if (customRenderGridItem) {
       return (
-        <div 
+        <div
           key={String(rowData[idField])}
+          data-index={index}
+          data-tablefront-row="true"
+          ref={measureRef as React.Ref<HTMLDivElement>}
+          style={style}
           onClick={() => handleRowClick(rowData)}
         >
           {customRenderGridItem(rowData, index, isSelected)}
@@ -147,6 +188,10 @@ export function DataGrid<TData>({
     return (
       <div
         key={String(rowData[idField])}
+        data-index={index}
+        data-tablefront-row="true"
+        ref={measureRef as React.Ref<HTMLDivElement>}
+        style={style}
         onClick={() => handleRowClick(rowData)}
         className={cn(
           tableStyles.grid.item,
@@ -241,7 +286,8 @@ export function DataGrid<TData>({
     table,
     customRenderGridItem,
     columnVisibility,
-    icons
+    icons,
+    idField,
   ])
 
   // Compute responsive column count like masonry based on container width
@@ -270,6 +316,9 @@ export function DataGrid<TData>({
     }
   }, [gridColumns, gridItemMinWidth])
 
+  const virtualItems = isVirtualized ? gridVirtualizer.getVirtualItems() : null
+  const lanes = Math.max(1, computedColumns)
+
   return (
     <>
       {customStaticRows.length > 0 && (
@@ -286,18 +335,44 @@ export function DataGrid<TData>({
           </div>
         </>
       )}
-      <div 
-        className={tableStyles.grid.container}
-        style={{
-          // Mirror masonry behavior: computed column count and flexible tracks that fill container
-          width: '100%',
-          maxWidth: '100%',
-          gridTemplateColumns: `repeat(${computedColumns}, 1fr)`,
-        }}
-        ref={gridContainerRef}
-      >
-        {displayRows.map((rowData, index) => renderGridItem(rowData, index))}
-      </div>
+      {isVirtualized && virtualItems ? (
+        <div
+          ref={gridContainerRef}
+          className="relative w-full max-w-full"
+          style={{ height: `${gridVirtualizer.getTotalSize()}px` }}
+        >
+          {virtualItems.map((virtualItem) => {
+            const rowData = displayRows[virtualItem.index]
+            if (!rowData) return null
+            return renderGridItem(
+              rowData,
+              virtualItem.index,
+              gridVirtualizer.measureElement,
+              {
+                position: 'absolute',
+                top: 0,
+                left: `${(virtualItem.lane / lanes) * 100}%`,
+                width: `${100 / lanes}%`,
+                transform: `translateY(${virtualItem.start - staticHeight}px)`,
+                padding: '2px',
+                boxSizing: 'border-box',
+              },
+            )
+          })}
+        </div>
+      ) : (
+        <div
+          className={tableStyles.grid.container}
+          style={{
+            width: '100%',
+            maxWidth: '100%',
+            gridTemplateColumns: `repeat(${computedColumns}, 1fr)`,
+          }}
+          ref={gridContainerRef}
+        >
+          {displayRows.map((rowData, index) => renderGridItem(rowData, index))}
+        </div>
+      )}
       
       {/* Loading indicator for infinite scroll in grid mode */}
       {(isLoadingMore || isLoadingLess) && shouldEnableInfiniteScroll && (

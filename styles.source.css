@@ -1,0 +1,45 @@
+/*
+ * Tablefront stylesheet source (Tailwind v4).
+ * Built to dist/styles.css and auto-imported by the package entry —
+ * consumers do not need to import this file.
+ *
+ * Preflight is intentionally omitted so host apps keep their own reset.
+ * Semantic colors read host CSS variables when present, with solid fallbacks.
+ */
+
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@plugin 'tailwindcss-animate';
+
+@source './dist/index.js';
+@source './dist/index.cjs';
+@source './src';
+
+@theme inline {
+  --color-background: var(--background, #ffffff);
+  --color-foreground: var(--foreground, #0f172a);
+  --color-card: var(--card, #ffffff);
+  --color-card-foreground: var(--card-foreground, #0f172a);
+  --color-popover: var(--popover, #ffffff);
+  --color-popover-foreground: var(--popover-foreground, #0f172a);
+  --color-primary: var(--primary, #0f172a);
+  --color-primary-foreground: var(--primary-foreground, #f8fafc);
+  --color-secondary: var(--secondary, #f1f5f9);
+  --color-secondary-foreground: var(--secondary-foreground, #0f172a);
+  --color-muted: var(--muted, #f1f5f9);
+  --color-muted-foreground: var(--muted-foreground, #64748b);
+  --color-accent: var(--accent, #f1f5f9);
+  --color-accent-foreground: var(--accent-foreground, #0f172a);
+  --color-destructive: var(--destructive, #ef4444);
+  --color-destructive-foreground: var(--destructive-foreground, #f8fafc);
+  --color-border: var(--border, #e2e8f0);
+  --color-input: var(--input, #e2e8f0);
+  --color-ring: var(--ring, #0f172a);
+  --radius-sm: var(--radius, 0.5rem);
+  --radius-md: var(--radius, 0.5rem);
+  --radius-lg: var(--radius, 0.5rem);
+  --radius-xl: var(--radius, 0.5rem);
+}

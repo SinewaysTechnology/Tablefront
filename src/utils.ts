@@ -273,6 +273,9 @@ export const RESIZE_CONSTRAINTS = {
   MAX_WIDTH: 8000,
 } as const
 
+export const clampColumnWidth = (width: number): number =>
+  Math.max(RESIZE_CONSTRAINTS.MIN_WIDTH, Math.min(RESIZE_CONSTRAINTS.MAX_WIDTH, width))
+
 export const applyResizeCursor = (isResizing: boolean) => {
   if (typeof document === 'undefined') return
   
@@ -289,91 +292,277 @@ export const getColumnWidth = (element: HTMLElement): number => {
   return element.getBoundingClientRect().width
 }
 
-// Optimized DOM column width setting with batch updates (for non-drag operations)
-export const applyColumnWidthToDom = (columnId: string, width: number) => {
-  const clampedWidth = Math.max(RESIZE_CONSTRAINTS.MIN_WIDTH, Math.min(RESIZE_CONSTRAINTS.MAX_WIDTH, width))
-  
-  const headerCell = document.querySelector(`th[data-column-id="${columnId}"]`) as HTMLElement
-  if (!headerCell) return clampedWidth
-  
+export type ApplyColumnWidthOptions = {
+  /** Cached header cell from resize start — skips querySelector on the hot path. */
+  headerCell?: HTMLElement | null
+  /**
+   * When false, only the header is updated.
+   * Enough for live drag feedback with `table-layout: fixed`.
+   * @default true
+   */
+  includeBodyCells?: boolean
+}
+
+const resolveHeaderCell = (
+  columnId: string,
+  headerCell?: HTMLElement | null,
+): HTMLElement | null =>
+  headerCell ??
+  (document.querySelector(`th[data-column-id="${columnId}"]`) as HTMLElement | null)
+
+const getBodyCellsForHeader = (headerCell: HTMLElement): NodeListOf<Element> | null => {
   const table = headerCell.closest('table')
+  if (!table) return null
   const columnIndex = Array.from(headerCell.parentElement?.children || []).indexOf(headerCell)
-  
-  // Batch DOM updates to reduce reflows
-  requestAnimationFrame(() => {
-    // Update header cell
-    applyColumnStyles(headerCell, clampedWidth)
-    
-    // Update body cells if table exists
-    if (table && columnIndex >= 0) {
-      const bodyCells = table.querySelectorAll(`tbody td:nth-child(${columnIndex + 1})`)
-      bodyCells.forEach(cell => {
-        applyColumnStyles(cell as HTMLElement, clampedWidth)
-      })
-    }
-    
-    // Force layout recalculation only once
-    headerCell.offsetWidth
-  })
-  
+  if (columnIndex < 0) return null
+  return table.querySelectorAll(`tbody td:nth-child(${columnIndex + 1})`)
+}
+
+/** Apply width for drag feedback or one-shot DOM updates. Avoids forced reflow. */
+export const applyColumnWidthToDomImmediate = (
+  columnId: string,
+  width: number,
+  options?: ApplyColumnWidthOptions,
+) => {
+  const clampedWidth = clampColumnWidth(width)
+  const headerCell = resolveHeaderCell(columnId, options?.headerCell)
+  if (!headerCell) return clampedWidth
+
+  applyColumnStyles(headerCell, clampedWidth)
+
+  if (options?.includeBodyCells !== false) {
+    const bodyCells = getBodyCellsForHeader(headerCell)
+    bodyCells?.forEach((cell) => applyColumnStyles(cell as HTMLElement, clampedWidth))
+  }
+
   return clampedWidth
 }
 
-// Immediate DOM column width setting for real-time drag feedback (no requestAnimationFrame)
-export const applyColumnWidthToDomImmediate = (columnId: string, width: number) => {
-  const clampedWidth = Math.max(RESIZE_CONSTRAINTS.MIN_WIDTH, Math.min(RESIZE_CONSTRAINTS.MAX_WIDTH, width))
-  
-  const headerCell = document.querySelector(`th[data-column-id="${columnId}"]`) as HTMLElement
-  if (!headerCell) return clampedWidth
-  
-  const table = headerCell.closest('table')
-  const columnIndex = Array.from(headerCell.parentElement?.children || []).indexOf(headerCell)
-  
-  // Apply styles immediately for real-time feedback
-  applyColumnStyles(headerCell, clampedWidth)
-  
-  // Update body cells immediately
-  if (table && columnIndex >= 0) {
-    const bodyCells = table.querySelectorAll(`tbody td:nth-child(${columnIndex + 1})`)
-    bodyCells.forEach(cell => {
-      applyColumnStyles(cell as HTMLElement, clampedWidth)
-    })
+/**
+ * Locked header-row widths for a resize drag.
+ * Freezes every column at its current on-screen width so `table-layout: fixed`
+ * + `width: 100%` cannot proportionally reflow (and snap) the active column.
+ * Width-locked columns are pinned and never absorb fill/shrink slack.
+ */
+export type ResizeLayoutLock = {
+  table: HTMLElement
+  headerCells: HTMLElement[]
+  /** Live widths (unlocked columns may grow to fill the viewport). */
+  widths: number[]
+  /** Immutable widths for `lockWidth` columns (and expand gutter). */
+  pinnedWidths: number[]
+  locked: boolean[]
+  activeIndex: number
+  totalWidth: number
+  hasPinnedColumns: boolean
+}
+
+export type LockTableResizeLayoutOptions = {
+  /** Header-cell indexes that must keep a fixed width while another column resizes. */
+  lockedIndexes?: Iterable<number>
+}
+
+export const parseCssPx = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string') return 0
+  const parsed = parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/** Resolve CSS length to px for layout math (`px` / `rem`; other units → 0). */
+export const cssLengthToPx = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string') return 0
+  const trimmed = value.trim()
+  if (!trimmed) return 0
+  if (trimmed.endsWith('%')) return 0
+  if (trimmed.endsWith('rem')) {
+    const rem = parseFloat(trimmed)
+    if (!Number.isFinite(rem)) return 0
+    const rootFontSize =
+      typeof document !== 'undefined'
+        ? parseCssPx(getComputedStyle(document.documentElement).fontSize) || 16
+        : 16
+    return rem * rootFontSize
   }
-  
-  // Force immediate layout recalculation
-  headerCell.offsetWidth
-  
+  if (trimmed.endsWith('px') || /^-?[\d.]+$/.test(trimmed)) {
+    return parseCssPx(trimmed)
+  }
+  return 0
+}
+
+const getTableScrollContainer = (table: HTMLElement): HTMLElement | null =>
+  (table.closest('[data-radix-scroll-area-viewport]') as HTMLElement | null) ||
+  table.parentElement
+
+/** Set table width so columns keep pixel sizes instead of being compressed into the viewport. */
+export const setTableContentWidth = (
+  table: HTMLElement,
+  contentWidth: number,
+  options?: { fillContainer?: boolean },
+) => {
+  const rounded = Math.max(0, Math.ceil(contentWidth))
+  const fillContainer = options?.fillContainer !== false
+  if (!fillContainer) {
+    table.style.width = `${rounded}px`
+    table.style.minWidth = `${rounded}px`
+    return
+  }
+
+  const scrollParent = getTableScrollContainer(table)
+  const containerWidth = scrollParent?.clientWidth ?? 0
+  const width = Math.max(rounded, containerWidth)
+  table.style.width = `${width}px`
+  table.style.minWidth = `${rounded}px`
+}
+
+/** Only trust inline `Npx` — rem/em/% would parse incorrectly via parseFloat. */
+const readInlinePxWidth = (cell: HTMLElement): number => {
+  for (const value of [cell.style.width, cell.style.maxWidth, cell.style.minWidth]) {
+    if (typeof value === 'string' && value.trim().endsWith('px')) {
+      const px = parseCssPx(value)
+      if (px > 0) return px
+    }
+  }
+  return 0
+}
+
+const measureCellWidth = (cell: HTMLElement, isPinned: boolean): number => {
+  if (isPinned) {
+    const fromStyle = readInlinePxWidth(cell)
+    if (fromStyle > 0) return fromStyle
+  }
+  return cell.getBoundingClientRect().width
+}
+
+/**
+ * Keep pinned columns at their fixed widths; optionally pour leftover viewport
+ * space into unlocked columns (never into pinned ones).
+ */
+const syncResizeLayoutWidths = (lock: ResizeLayoutLock) => {
+  // Re-pin locked columns every frame so table fill cannot stretch them
+  for (let index = 0; index < lock.headerCells.length; index++) {
+    if (lock.locked[index]) {
+      lock.widths[index] = lock.pinnedWidths[index] ?? lock.widths[index] ?? 0
+    }
+  }
+
+  let total = lock.widths.reduce((sum, value) => sum + value, 0)
+  const containerWidth = getTableScrollContainer(lock.table)?.clientWidth ?? 0
+
+  if (total < containerWidth) {
+    const flexibleIndexes = lock.widths
+      .map((_, index) =>
+        !lock.locked[index] && index !== lock.activeIndex ? index : -1,
+      )
+      .filter((index) => index >= 0)
+
+    if (flexibleIndexes.length > 0) {
+      const slack = containerWidth - total
+      const each = slack / flexibleIndexes.length
+      flexibleIndexes.forEach((index) => {
+        lock.widths[index] = (lock.widths[index] ?? 0) + each
+      })
+      total = containerWidth
+    }
+    // If only the active column is flexible, leave empty space — don't stretch pinned cols
+  }
+
+  lock.headerCells.forEach((cell, index) => {
+    applyColumnStyles(cell, lock.widths[index] ?? 0)
+  })
+
+  lock.totalWidth = total
+  // Fill the viewport when possible; pinned lockWidth columns never receive slack
+  setTableContentWidth(lock.table, total, {
+    fillContainer: !lock.hasPinnedColumns || total >= containerWidth,
+  })
+}
+
+/** Freeze all header cells at their current measured widths and size the table to match. */
+export const lockTableResizeLayout = (
+  activeHeaderCell: HTMLElement,
+  options?: LockTableResizeLayoutOptions,
+): ResizeLayoutLock | null => {
+  const table = activeHeaderCell.closest('table') as HTMLElement | null
+  const row = activeHeaderCell.parentElement
+  if (!table || !row) return null
+
+  const headerCells = Array.from(row.children) as HTMLElement[]
+  const activeIndex = headerCells.indexOf(activeHeaderCell)
+  if (activeIndex < 0) return null
+
+  const lockedSet = new Set(options?.lockedIndexes ?? [])
+  const locked = headerCells.map((_, index) => lockedSet.has(index))
+  const widths = headerCells.map((cell, index) => measureCellWidth(cell, locked[index] ?? false))
+  const pinnedWidths = widths.map((width, index) => (locked[index] ? width : 0))
+
+  const lock: ResizeLayoutLock = {
+    table,
+    headerCells,
+    widths,
+    pinnedWidths,
+    locked,
+    activeIndex,
+    totalWidth: 0,
+    hasPinnedColumns: locked.some(Boolean),
+  }
+
+  syncResizeLayoutWidths(lock)
+  return lock
+}
+
+/** Update the active column inside a layout lock and grow/shrink the table with it. */
+export const applyLockedColumnResize = (
+  lock: ResizeLayoutLock,
+  activeWidth: number,
+): number => {
+  const clampedWidth = clampColumnWidth(activeWidth)
+  if (lock.locked[lock.activeIndex]) return lock.widths[lock.activeIndex] ?? clampedWidth
+
+  lock.widths[lock.activeIndex] = clampedWidth
+  syncResizeLayoutWidths(lock)
   return clampedWidth
 }
+
+/**
+ * Width from the column's current left edge to the pointer.
+ * Uses live left so auto-reflow on the left doesn't desync the handle from the cursor.
+ * `edgeOffset` is pointerX - rightEdge at drag start (hitslop grab correction).
+ */
+export const measureColumnWidthFromPointer = (
+  clientX: number,
+  headerCell: HTMLElement,
+  edgeOffset: number = 0,
+): number => {
+  const left = headerCell.getBoundingClientRect().left
+  return clampColumnWidth(clientX - left - edgeOffset)
+}
+
+/** @deprecated Prefer `applyColumnWidthToDomImmediate`. */
+export const applyColumnWidthToDom = (
+  columnId: string,
+  width: number,
+  options?: ApplyColumnWidthOptions,
+) => applyColumnWidthToDomImmediate(columnId, width, options)
 
 // Utility to apply consistent column styles
 const applyColumnStyles = (element: HTMLElement, width: number) => {
-  element.style.width = `${width}px`
-  element.style.minWidth = `${width}px`
-  element.style.maxWidth = `${width}px`
+  const px = `${width}px`
+  element.style.width = px
+  element.style.minWidth = px
+  element.style.maxWidth = px
 }
 
-// Optimized function to clear column styles
+// Clear inline column styles (header + body) after reset
 export const clearColumnStyles = (columnId: string) => {
-  const headerCell = document.querySelector(`th[data-column-id="${columnId}"]`) as HTMLElement
+  const headerCell = resolveHeaderCell(columnId)
   if (!headerCell) return
-  
-  const table = headerCell.closest('table')
-  const columnIndex = Array.from(headerCell.parentElement?.children || []).indexOf(headerCell)
-  
-  // Clear header styles
+
   clearElementStyles(headerCell)
-  
-  // Clear body cell styles
-  if (table && columnIndex >= 0) {
-    const bodyCells = table.querySelectorAll(`tbody td:nth-child(${columnIndex + 1})`)
-    bodyCells.forEach(cell => {
-      clearElementStyles(cell as HTMLElement)
-    })
-  }
-  
-  // Force layout recalculation
-  headerCell.offsetWidth
+
+  const bodyCells = getBodyCellsForHeader(headerCell)
+  bodyCells?.forEach((cell) => clearElementStyles(cell as HTMLElement))
 }
 
 // Utility to clear individual element styles

@@ -122,10 +122,10 @@ export const defaultTableStyles: PartialTableStyles = {
   },
   
   resize: {
-    handle: "absolute top-0 right-0 bottom-0 w-1 group-hover:bg-primary/20 z-10",
-    indicator: "absolute top-1/2 right-0 w-1 h-4 group-hover:bg-primary/40 transform -translate-y-1/2 rounded-full",
+    handle: "absolute top-0 right-0 bottom-0 w-1 bg-transparent group-hover:bg-primary/25 z-10",
+    indicator: "absolute top-1/2 right-0 w-0.5 h-4 bg-border/80 group-hover:bg-primary group-hover:w-1 transform -translate-y-1/2 rounded-full transition-[background-color,width]",
     overlay: "fixed inset-0 z-[9999] cursor-col-resize",
-    hitslop: "absolute top-0 right-0 bottom-0 w-2 cursor-col-resize group z-10"
+    hitslop: "absolute top-0 -right-1 bottom-0 w-3 cursor-col-resize group z-10 hover:bg-primary/10"
   }
 }
 
@@ -250,10 +250,10 @@ export const modernTableStyles: PartialTableStyles = {
   },
   
   resize: {
-    handle: "absolute top-0 right-0 bottom-0 w-1 group-hover:bg-primary/20 z-10",
-    indicator: "absolute top-1/2 right-0 w-1 h-4 bg-border group-hover:bg-primary/40 transform -translate-y-1/2 rounded-full",
+    handle: "absolute top-0 right-0 bottom-0 w-1 bg-transparent group-hover:bg-primary/25 z-10",
+    indicator: "absolute top-1/2 right-0 w-0.5 h-4 bg-border group-hover:bg-primary group-hover:w-1 transform -translate-y-1/2 rounded-full transition-[background-color,width]",
     overlay: "fixed inset-0 z-[9999] cursor-col-resize",
-    hitslop: "absolute top-0 right-0 bottom-0 w-2 cursor-col-resize group z-10"
+    hitslop: "absolute top-0 -right-1 bottom-0 w-3 cursor-col-resize group z-10 hover:bg-primary/10"
   }
 }
 
@@ -378,10 +378,10 @@ export const compactTableStyles: PartialTableStyles = {
   },
   
   resize: {
-    handle: "absolute top-0 right-0 bottom-0 w-1 group-hover:bg-primary/20 z-10",
-    indicator: "absolute top-1/2 right-0 w-1 h-4 bg-border group-hover:bg-primary/40 transform -translate-y-1/2 rounded-full",
+    handle: "absolute top-0 right-0 bottom-0 w-1 bg-transparent group-hover:bg-primary/25 z-10",
+    indicator: "absolute top-1/2 right-0 w-0.5 h-4 bg-border group-hover:bg-primary group-hover:w-1 transform -translate-y-1/2 rounded-full transition-[background-color,width]",
     overlay: "fixed inset-0 z-[9999] cursor-col-resize",
-    hitslop: "absolute top-0 right-0 bottom-0 w-2 cursor-col-resize group z-10"
+    hitslop: "absolute top-0 -right-1 bottom-0 w-3 cursor-col-resize group z-10 hover:bg-primary/10"
   }
 }
 

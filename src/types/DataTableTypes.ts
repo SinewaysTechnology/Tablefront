@@ -224,6 +224,18 @@ export interface DataTableProps<TData> {
    */
   loadingText?: string
   /**
+   * Optional UI copy overrides (i18n-friendly).
+   * @example { result: 'Resultaat', results: 'Resultaten' }
+   */
+  labels?: {
+    /** Singular result-count label. @default "Result" */
+    result?: string
+    /** Plural result-count label. @default "Results" */
+    results?: string
+    /** Column settings reset button. @default "Reset to defaults" */
+    resetToDefaults?: string
+  }
+  /**
    * Global loading state for the table.
    * @default false
    */
@@ -246,9 +258,11 @@ export interface DataTableProps<TData> {
    */
   paginationConfig?: DataTablePaginationConfig
   /**
-   * Configure infinite or adaptive scrolling behavior.
+   * Configure infinite scrolling and/or real row virtualization.
+   * Omit `pageSize` / `increment` / `maxItems` to render the full list.
    * @example
-   * { enabled: true, pageSize: 50, increment: 25 }
+   * { enabled: true, virtualized: true }
+   * { enabled: true, virtualized: true, pageSize: 50, increment: 25, maxItems: 150 }
    */
   infiniteScrollConfig?: InfiniteScrollConfig
 
@@ -288,7 +302,7 @@ export interface DataTableLayout {
   showColumnVisibility?: boolean
   /** Show the filters button. @default true */
   showFilterButton?: boolean
-  /** Show a reset button inside settings popover. @default false */
+  /** Show a reset-to-defaults button inside column settings. @default true */
   showResetTableButtonInSettings?: boolean
   /** Rendering mode. @default 'table' */
   displayMode?: 'table' | 'grid' | 'masonry'
@@ -324,24 +338,57 @@ export interface DataTablePaginationConfig {
 }
 
 /**
- * Infinite scrolling configuration (unified for both regular and adaptive)
+ * Infinite scrolling / virtualization configuration
  */
 export interface InfiniteScrollConfig {
   /** Enable infinite scrolling. @default false */
   enabled?: boolean
-  /** Use adaptive windowed scrolling instead of regular. @default false */
+  /**
+   * Real row virtualization via TanStack Virtual (only visible rows in the DOM).
+   * Does **not** change scroll height by itself — combine with growing `pageSize`
+   * (default) or `maxItems` windowing for a usable scrollbar thumb.
+   * Masonry ignores this (no row virtualization).
+   * @default false (also auto-enabled when `enabled` is true for table/grid)
+   */
+  virtualized?: boolean
+  /**
+   * @deprecated Use `virtualized`. Kept as an alias for backwards compatibility.
+   */
   adaptive?: boolean
+  /**
+   * Show the entire sorted/filtered list at once (no progressive page growth).
+   * Scroll height reflects the full dataset (thumb gets small on large lists).
+   * Prefer `maxItems` or growing infinite scroll (`pageSize` / `increment`) for a nicer scrollbar.
+   *
+   * When omitted: defaults to **true** if `pageSize`, `increment`, and `maxItems` are all unset
+   * (so `{ enabled: true }` loads everything). Set `fullList: false` to force growing pageSize
+   * with the standard default of 25.
+   */
+  fullList?: boolean
   /** Distance from viewport edge to trigger load (px). @default 100 */
   loadThreshold?: number
-  /** Items per page/load. @default 25 */
+  /**
+   * Initial items for growing infinite scroll.
+   * Setting this (or `increment` / `maxItems`) opts into progressive loading instead of the full list.
+   * @default 25 when progressive loading is active
+   */
   pageSize?: number
-  /** Items to add per scroll step. @default 25 */
+  /**
+   * Items to add per scroll step (growing mode).
+   * Setting this opts into progressive loading.
+   * @default 25 when progressive loading is active
+   */
   increment?: number
   /**
-   * Max items to keep in memory (adaptive). Defaults to 3x pageSize or 3x viewport-estimated items.
-   * @default pageSize * 3 (when viewport unknown)
+   * Cap how many rows contribute to scroll height (sliding window).
+   * Keeps the scrollbar thumb usable while still scrolling through the full list.
+   * Setting this opts into progressive/windowed loading. Ignored when `fullList` is true.
    */
   maxItems?: number
+  /** Estimated row/item height in px for the virtualizer. @default 40 */
+  estimateSize?: number
+  /** Extra rows rendered outside the viewport. @default 8 */
+  overscan?: number
 }
 
 // ============================================================================
@@ -367,10 +414,20 @@ export interface ColumnOverrides<TData = any> {
     cell?: (info: any) => React.ReactNode      // Cell content with full styling control
     /** Header text and sort icon alignment. @default 'left' */
     headerAlignment?: HeaderAlignment          // Header text and sort icon alignment
+    /**
+     * Lock column width — no resize handle; user/store widths are ignored.
+     * Use with `width` or `meta.style` width values.
+     * @default false
+     */
+    lockWidth?: boolean
+    /** Fixed width in px (number) or any CSS length string. */
+    width?: number | string
     /** Column-level styling (width, classes, etc.). @default {} */
     meta?: {                                    // Column-level styling (width, etc.)
       /** Class applied to header and cells. */
       className?: string                        // Applied to both header and cells
+      /** Same as top-level `lockWidth` when set on meta. */
+      lockWidth?: boolean
       [key: string]: any
     }
   }
@@ -505,7 +562,18 @@ export interface TableState {
   columnOrder: string[]
   columnWidths: ColumnWidthState
   // Selectors
-  getState: () => Omit<TableState, 'getState' | 'resetTableState' | 'setSorting' | 'setPagination' | 'setColumnVisibility' | 'setColumnOrder' | 'setColumnWidth' | 'resetColumnWidth'>
+  getState: () => Omit<
+    TableState,
+    | 'getState'
+    | 'resetTableState'
+    | 'resetToDefaults'
+    | 'setSorting'
+    | 'setPagination'
+    | 'setColumnVisibility'
+    | 'setColumnOrder'
+    | 'setColumnWidth'
+    | 'resetColumnWidth'
+  >
   // Actions
   setSorting: (updaterOrValue: any) => void
   setPagination: (updaterOrValue: any) => void
@@ -514,6 +582,7 @@ export interface TableState {
   setColumnWidth: (columnId: string, width: number) => void
   resetColumnWidth: (columnId: string) => void
   resetTableState: () => void
+  resetToDefaults: (defaultColumnVisibility: Record<string, boolean>) => void
 }
 
 /**

@@ -1,9 +1,10 @@
-"use client"
+'use client'
 
 import React, { useCallback, useRef, useEffect, useState } from 'react'
 import { flexRender } from '@tanstack/react-table'
 import { cn } from '../utils'
 import type { DataTableIcons } from '../types/DataTableTypes'
+import type { DataTableVirtualizer } from '../hooks/useDataTableVirtualizer'
 
 /**
  * Props for the DataTableBody component
@@ -51,6 +52,10 @@ export interface DataTableBodyProps<TData> {
   scrollAreaRef?: React.RefObject<HTMLDivElement | null>
   // Static rows width behavior
   clampStaticRowsToContainer?: boolean
+
+  /** TanStack row virtualizer — when set, only visible rows are mounted. */
+  rowVirtualizer?: DataTableVirtualizer | null
+  isVirtualized?: boolean
 }
 
 /**
@@ -74,9 +79,11 @@ export function DataTableBody<TData>({
   icons,
   clampExpandedContentToContainer = true,
   clampStaticRowsToContainer = true,
-  scrollAreaRef
+  scrollAreaRef,
+  rowVirtualizer = null,
+  isVirtualized = false,
 }: DataTableBodyProps<TData>) {
-  const [headerHeight, setHeaderHeight] = useState(40) // Default header height
+  const [headerHeight, setHeaderHeight] = useState(40)
   const [headerHasBorder, setHeaderHasBorder] = useState(false)
   const tbodyRef = useRef<HTMLTableSectionElement>(null)
   const [containerWidth, setContainerWidth] = useState<number | null>(null)
@@ -90,12 +97,15 @@ export function DataTableBody<TData>({
     onToggleExpand(row, e)
   }, [onToggleExpand])
 
+  const columnCount =
+    table.getVisibleLeafColumns().length + (expandable ? 1 : 0)
+
   // Calculate header height dynamically
   useEffect(() => {
     if (!tbodyRef.current) return
-    const table = tbodyRef.current.closest('table')
-    if (!table) return
-    const thead = table.querySelector('thead') as HTMLElement | null
+    const tableEl = tbodyRef.current.closest('table')
+    if (!tableEl) return
+    const thead = tableEl.querySelector('thead') as HTMLElement | null
     if (!thead) return
 
     setHeaderHeight(thead.offsetHeight)
@@ -104,10 +114,32 @@ export function DataTableBody<TData>({
     setHeaderHasBorder(borderBottomWidth > 0)
   }, [displayRows])
 
+  // Remeasure when expansion toggles — sibling expanded rows aren't in the RO target.
+  const expandedFingerprint =
+    expandable && isVirtualized && rowVirtualizer
+      ? rowVirtualizer
+          .getVirtualItems()
+          .map((item) => {
+            const row = displayRows[item.index]
+            return row && isRowExpanded(row) ? '1' : '0'
+          })
+          .join('')
+      : ''
+
+  useEffect(() => {
+    if (!isVirtualized || !rowVirtualizer || !expandable) return
+    rowVirtualizer.measure()
+  }, [isVirtualized, rowVirtualizer, expandable, expandedFingerprint])
+
   // Measure scroll container width and listen to horizontal scroll if clamping is enabled
   useEffect(() => {
     if (!clampExpandedContentToContainer && !clampStaticRowsToContainer) return
-    const viewport = (scrollAreaRef?.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null) || scrollAreaRef?.current || null
+    const viewport =
+      (scrollAreaRef?.current?.querySelector(
+        '[data-radix-scroll-area-viewport]',
+      ) as HTMLElement | null) ||
+      scrollAreaRef?.current ||
+      null
     if (!viewport) return
     const update = () => {
       setContainerWidth(viewport.clientWidth)
@@ -124,27 +156,136 @@ export function DataTableBody<TData>({
     }
   }, [clampExpandedContentToContainer, clampStaticRowsToContainer, scrollAreaRef])
 
+  const renderDataRow = (rowData: TData, index: number) => {
+    const rowId = String(rowData[idField])
+    const isSelected = selectedId !== null && rowId === String(selectedId)
+    const scrubbingActive =
+      highlightedId !== null && String(highlightedId) !== String(selectedId)
+    const isHighlighted = highlightedId !== null && rowId === String(highlightedId)
+    const expanded = expandable ? isRowExpanded(rowData) : false
+    // Prefer pre-pagination model so full-list virtualization can resolve every row.
+    const tableRow =
+      table.getPrePaginationRowModel().rowsById[rowId] ??
+      table.getRowModel().rowsById[rowId]
+
+    if (!tableRow) return null
+
+    return (
+      <React.Fragment key={rowId}>
+        <tr
+          data-index={index}
+          data-expanded={expanded ? 'true' : 'false'}
+          data-tablefront-row="true"
+          ref={
+            isVirtualized && rowVirtualizer
+              ? rowVirtualizer.measureElement
+              : undefined
+          }
+          onClick={() => handleRowClick(rowData)}
+          className={cn(
+            tableStyles.table.tableRow,
+            tableStyles.table.tableRowHover,
+            (isHighlighted || (isSelected && !scrubbingActive)) &&
+              tableStyles.table.tableRowSelected,
+          )}
+        >
+          {expandable && (
+            <td className={tableStyles.table.expandButton}>
+              <button
+                onClick={(e) => handleToggleExpand(rowData, e)}
+                className="w-full h-full flex items-center justify-center hover:bg-foreground/5"
+              >
+                {expanded ? (
+                  icons.CollapseIcon && (
+                    <icons.CollapseIcon className="w-4 h-4" />
+                  )
+                ) : (
+                  icons.ExpandIcon && <icons.ExpandIcon className="w-4 h-4" />
+                )}
+              </button>
+            </td>
+          )}
+          {tableRow.getVisibleCells().map((cell: any) => (
+            <td
+              key={cell.id}
+              className={cn(
+                tableStyles.table.tableCell,
+                enableColumnResize && 'overflow-hidden',
+                (cell.column.columnDef.meta as { className?: string } | undefined)
+                  ?.className,
+              )}
+              style={
+                (cell.column.columnDef.meta as { style?: React.CSSProperties } | undefined)
+                  ?.style
+              }
+            >
+              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+            </td>
+          ))}
+        </tr>
+        {expandable && expanded && renderExpandedContent && (
+          <tr data-expanded-content="true">
+            <td
+              colSpan={columnCount}
+              className="p-0 bg-background"
+            >
+              {clampExpandedContentToContainer ? (
+                <div
+                  className="overflow-hidden"
+                  style={{
+                    position: 'sticky',
+                    left: 0,
+                    width: containerWidth ? `${containerWidth}px` : undefined,
+                    maxWidth: '100%',
+                  }}
+                >
+                  {renderExpandedContent(rowData)}
+                </div>
+              ) : (
+                renderExpandedContent(rowData)
+              )}
+            </td>
+          </tr>
+        )}
+      </React.Fragment>
+    )
+  }
+
+  const virtualItems =
+    isVirtualized && rowVirtualizer ? rowVirtualizer.getVirtualItems() : null
+  const paddingTop =
+    virtualItems && virtualItems.length > 0 ? virtualItems[0].start : 0
+  const paddingBottom =
+    virtualItems && virtualItems.length > 0 && rowVirtualizer
+      ? rowVirtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
+      : 0
+
   return (
     <tbody ref={tbodyRef}>
       {/* Custom static rows */}
       {customStaticRows.map((staticRow, index) => (
-        <tr 
+        <tr
           key={`custom-static-${index}`}
           data-index={`static-${index}`}
-          data-static={customStaticRowsSticky ? "true" : "false"}
-          className={cn(
-            tableStyles.table.tableRow
-          )}
-          style={customStaticRowsSticky ? {
-            position: 'sticky',
-            top: `${headerHeight}px`,
-            zIndex: 10,
-            // backgroundColor: 'var(--background)',
-            // borderBottom: '1px solid var(--border)',
-            // boxShadow: 'var(--static-row-shadow, 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06))'
-          } : undefined}
+          data-static={customStaticRowsSticky ? 'true' : 'false'}
+          className={cn(tableStyles.table.tableRow)}
+          style={
+            customStaticRowsSticky
+              ? {
+                  position: 'sticky',
+                  top: `${headerHeight}px`,
+                  zIndex: 10,
+                }
+              : undefined
+          }
         >
-          <td colSpan={table.getVisibleLeafColumns().length + (expandable ? 1 : 0)} className={cn('p-0', headerHasBorder && 'border-t border-border')}>
+          <td
+            colSpan={columnCount}
+            className={cn(
+              'p-0',
+              headerHasBorder && 'border-t border-border',
+            )}
+          >
             {clampStaticRowsToContainer ? (
               <div
                 className="overflow-hidden"
@@ -152,7 +293,7 @@ export function DataTableBody<TData>({
                   position: 'sticky',
                   left: 0,
                   width: containerWidth ? `${containerWidth}px` : undefined,
-                  maxWidth: '100%'
+                  maxWidth: '100%',
                 }}
               >
                 {staticRow}
@@ -163,86 +304,42 @@ export function DataTableBody<TData>({
           </td>
         </tr>
       ))}
-      
-      {/* Data rows */}
-      {displayRows.map((rowData, index) => {
-        const rowId = String(rowData[idField])
-        const isSelected = selectedId !== null && rowId === String(selectedId)
-        const scrubbingActive = highlightedId !== null && String(highlightedId) !== String(selectedId)
-        const isHighlighted = highlightedId !== null && rowId === String(highlightedId)
-        const expanded = expandable ? isRowExpanded(rowData) : false
-        const tableRow = table.getRowModel().rowsById[rowId]
-        
-        // Handle normal rows
-        if (!tableRow) return null
-        
-        return (
-          <React.Fragment key={rowId}>
-            <tr 
-              data-index={index}
-              onClick={() => handleRowClick(rowData)}
-              className={cn(
-                tableStyles.table.tableRow,
-                tableStyles.table.tableRowHover,
-                (isHighlighted || (isSelected && !scrubbingActive)) && tableStyles.table.tableRowSelected
-              )}
-            >
-              {expandable && (
-                <td className={tableStyles.table.expandButton}>
-                  <button
-                    onClick={(e) => handleToggleExpand(rowData, e)}
-                    className="w-full h-full flex items-center justify-center hover:bg-foreground/5"
-                  >
-                    {expanded ? (
-                      icons.CollapseIcon && (
-                        <icons.CollapseIcon className="w-4 h-4" />
-                      )
-                    ) : (
-                      icons.ExpandIcon && (
-                        <icons.ExpandIcon className="w-4 h-4" />
-                      )
-                    )}
-                  </button>
-                </td>
-              )}
-              {tableRow.getVisibleCells().map((cell: any) => (
-                <td 
-                  key={cell.id} 
-                  className={cn(
-                    tableStyles.table.tableCell,
-                    enableColumnResize && "overflow-hidden",
-                    (cell.column.columnDef.meta as { className?: string } | undefined)?.className
-                  )}
-                  style={(cell.column.columnDef.meta as { style?: React.CSSProperties } | undefined)?.style}
-                >
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
-              ))}
+
+      {isVirtualized && virtualItems ? (
+        <>
+          {paddingTop > 0 && (
+            <tr aria-hidden="true" className="pointer-events-none">
+              <td
+                colSpan={columnCount}
+                style={{
+                  height: paddingTop,
+                  padding: 0,
+                  border: 0,
+                }}
+              />
             </tr>
-            {expandable && expanded && renderExpandedContent && (
-              <tr>
-                <td colSpan={table.getVisibleLeafColumns().length + (expandable ? 1 : 0)} className="p-0 bg-background">
-                  {clampExpandedContentToContainer ? (
-                    <div
-                      className="overflow-hidden"
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        width: containerWidth ? `${containerWidth}px` : undefined,
-                        maxWidth: '100%'
-                      }}
-                    >
-                      {renderExpandedContent(rowData)}
-                    </div>
-                  ) : (
-                    renderExpandedContent(rowData)
-                  )}
-                </td>
-              </tr>
-            )}
-          </React.Fragment>
-        )
-      })}
+          )}
+          {virtualItems.map((virtualRow) => {
+            const rowData = displayRows[virtualRow.index]
+            if (!rowData) return null
+            return renderDataRow(rowData, virtualRow.index)
+          })}
+          {paddingBottom > 0 && (
+            <tr aria-hidden="true" className="pointer-events-none">
+              <td
+                colSpan={columnCount}
+                style={{
+                  height: paddingBottom,
+                  padding: 0,
+                  border: 0,
+                }}
+              />
+            </tr>
+          )}
+        </>
+      ) : (
+        displayRows.map((rowData, index) => renderDataRow(rowData, index))
+      )}
     </tbody>
   )
 }
@@ -277,12 +374,8 @@ export function TableRow<TData>({
     onRowClick(rowData)
   }, [onRowClick, rowData])
 
-  const handleToggleExpand = useCallback((e: React.MouseEvent) => {
-    onToggleExpand(rowData, e)
-  }, [onToggleExpand, rowData])
-
   return (
-    <tr 
+    <tr
       data-index={index}
       onClick={handleRowClick}
       className={className}
@@ -308,11 +401,7 @@ export function TableCell({
   [key: string]: any
 }) {
   return (
-    <td 
-      className={className}
-      style={style}
-      {...props}
-    >
+    <td className={className} style={style} {...props}>
       {children}
     </td>
   )
@@ -336,9 +425,12 @@ export function ExpandButton<TData>({
   className?: string
   [key: string]: any
 }) {
-  const handleToggleExpand = useCallback((e: React.MouseEvent) => {
-    onToggleExpand(rowData, e)
-  }, [onToggleExpand, rowData])
+  const handleToggleExpand = useCallback(
+    (e: React.MouseEvent) => {
+      onToggleExpand(rowData, e)
+    },
+    [onToggleExpand, rowData],
+  )
 
   return (
     <td className={className} {...props}>
@@ -347,15 +439,11 @@ export function ExpandButton<TData>({
         className="w-full h-full flex items-center justify-center hover:bg-foreground/5"
       >
         {expanded ? (
-          icons.CollapseIcon && (
-            <icons.CollapseIcon className="w-4 h-4" />
-          )
+          icons.CollapseIcon && <icons.CollapseIcon className="w-4 h-4" />
         ) : (
-          icons.ExpandIcon && (
-            <icons.ExpandIcon className="w-4 h-4" />
-          )
+          icons.ExpandIcon && <icons.ExpandIcon className="w-4 h-4" />
         )}
       </button>
     </td>
   )
-} 
+}
