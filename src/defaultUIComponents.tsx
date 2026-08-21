@@ -306,13 +306,18 @@ export const SimplePopoverContent = React.memo<{
 
     const triggerRect = context.triggerRef.current.getBoundingClientRect();
     const contentRef = context.contentRef.current;
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const edgeMargin = 8;
 
-    // Reset styles for measurement
+    // Reset styles for measurement, then cap width so the popover always fits.
     if (innerRef.current) {
       innerRef.current.style.maxHeight = '';
       innerRef.current.style.overflowY = '';
     }
     contentRef.style.visibility = 'hidden';
+    contentRef.style.maxWidth = `${Math.max(0, viewportWidth - edgeMargin * 2)}px`;
+    contentRef.style.boxSizing = 'border-box';
 
     const contentRect = contentRef.getBoundingClientRect();
 
@@ -322,10 +327,6 @@ export const SimplePopoverContent = React.memo<{
     const borderTop = parseFloat(style.borderTopWidth);
     const borderBottom = parseFloat(style.borderBottomWidth);
     const extraVertical = paddingTop + paddingBottom + borderTop + borderBottom;
-
-    const viewportHeight = window.innerHeight;
-    const viewportWidth = window.innerWidth;
-    const edgeMargin = 8;
 
     const spaceBelow = viewportHeight - triggerRect.bottom - sideOffset - edgeMargin;
     const spaceAbove = triggerRect.top - sideOffset - edgeMargin;
@@ -420,7 +421,7 @@ export const SimplePopoverContent = React.memo<{
         className
       )}
     >
-      <div ref={innerRef} className="pr-2">
+      <div ref={innerRef} className="min-w-0 max-w-full overflow-x-hidden">
         {children}
       </div>
     </div>,

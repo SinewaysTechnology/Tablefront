@@ -137,8 +137,25 @@ export function useDataTableState<TData>({
   // FILTER AND SEARCH STATE
   // ============================================================================
   
-  // Stabilize field overrides to prevent unnecessary re-renders
-  const stableFieldOverrides = useMemo(() => fieldOverrides, [JSON.stringify(fieldOverrides)])
+  const columnFieldLabels = useMemo(() => {
+    const labels: Record<string, string> = {}
+    const sourceColumns = columns || []
+
+    sourceColumns.forEach((column) => {
+      const columnId = column.id || String(((column as { accessorKey?: string })?.accessorKey) || '')
+      if (!columnId) return
+      const header = columnOverrides[columnId]?.header ?? column.header
+      if (typeof header === 'string' && header.trim()) labels[columnId] = header.trim()
+    })
+
+    Object.entries(columnOverrides).forEach(([columnId, override]) => {
+      if (typeof override.header === 'string' && override.header.trim()) {
+        labels[columnId] = override.header.trim()
+      }
+    })
+
+    return labels
+  }, [columns, columnOverrides])
 
   const filterStore = useMemo(() => {
     const hasData = data.length > 0
@@ -147,16 +164,16 @@ export function useDataTableState<TData>({
       return createEntityFilterStore(`${stableStoreId}-empty`, [], [])
     }
     
-    const effectiveFieldOverrides = stableFieldOverrides || {}
+    const effectiveFieldOverrides = fieldOverrides || {}
     
     const { filters: autoFilters, searches: autoSearches } = buildFields(
       data, 
       effectiveFieldOverrides, 
-      { idField }
+      { idField, fieldLabels: columnFieldLabels }
     )
     
     return createEntityFilterStore(`${stableStoreId}-filters`, autoFilters, autoSearches)
-  }, [stableFieldOverrides, data.length, idField, stableStoreId])
+  }, [fieldOverrides, data, idField, stableStoreId, columnFieldLabels])
 
   const {
     filters,
@@ -273,62 +290,13 @@ export function useDataTableState<TData>({
   // DATA PROCESSING STATE
   // ============================================================================
   
-  // Memoize search fields to avoid repeated calls
-  const searchFields = useMemo(() => {
-    return filterProcessor?.getSearchFields() || []
-  }, [filterProcessor])
-  
-  // Memoize search value for performance
-  const memoizedSearchValue = useMemo(() => storeSearchValue, [storeSearchValue])
-  
-  // Apply search and filters to data
-  // Performance optimizations:
-  // - Memoized search fields to avoid repeated calls
-  // - Memoized search value to prevent unnecessary recalculations
-  // - Optimized plain text search with for loops instead of Array.some()
-  // - Early return for empty search terms
-  // - Pre-computed search term length for better loop performance
+  // Search tokens and typed column conditions are normalized into one filter
+  // model by the store. Apply it once so custom paths, multi-word search, and
+  // column filters always use identical semantics.
   const filteredData = useMemo(() => {
     if (!data.length || !filterProcessor) return data
-    
-    let result = data
-    
-    // Handle search with filter syntax (e.g., "field:value") or plain text search
-    if (memoizedSearchValue && filterProcessor) {
-      if (memoizedSearchValue.includes(':')) {
-        const extractedFilters = filterProcessor.extractFilters(memoizedSearchValue)
-        if (extractedFilters.length > 0) {
-          result = filterProcessor.applyFilters(result, extractedFilters)
-        }
-      } else {
-        // Optimized plain text search - pre-compute search term once
-        const searchLower = memoizedSearchValue.toLowerCase()
-        const searchFieldsLength = searchFields.length
-        
-        // Early return for empty search
-        if (!searchLower) return result
-        
-        result = result.filter((item: any) => {
-          // Use for loop instead of some() for better performance
-          for (let i = 0; i < searchFieldsLength; i++) {
-            const field = searchFields[i]
-            const value = String(item[field.id] || '').toLowerCase()
-            if (value.includes(searchLower)) {
-              return true
-            }
-          }
-          return false
-        })
-      }
-    }
-    
-    // Apply additional filters
-    if (filters.length > 0 && filterProcessor) {
-      result = filterProcessor.applyFilters(result, filters)
-    }
-    
-    return result
-  }, [data, filters, memoizedSearchValue, filterProcessor, searchFields])
+    return filters.length > 0 ? filterProcessor.applyFilters(data, filters) : data
+  }, [data, filters, filterProcessor])
 
   // All rows are normal rows now (custom static rows are handled separately)
   const normalRows = filteredData

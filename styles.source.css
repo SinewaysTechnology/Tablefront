@@ -43,3 +43,37 @@
   --radius-lg: var(--radius, 0.5rem);
   --radius-xl: var(--radius, 0.5rem);
 }
+
+/* Unlayered so these win over Button `inline-flex` / fixed-height utilities. */
+[data-tf-filter-item] {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  justify-content: stretch;
+  white-space: nowrap;
+  cursor: pointer;
+  appearance: none;
+  transition: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+[data-tf-filter-item]:hover,
+[data-tf-filter-item]:active {
+  transition: none;
+}
+
+/* While reordering columns, other headers must not pick up hover/drop fills. */
+[data-tf-column-dragging] th:hover {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+[data-tf-column-dragging] [data-tablefront-resize-handle] {
+  pointer-events: none;
+}

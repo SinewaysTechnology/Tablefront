@@ -7,7 +7,14 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { FilterField, FilterOption, FilterProcessor } from '../filters'
+import {
+  type ComparisonOperator,
+  FilterField,
+  FilterOption,
+  FilterProcessor,
+  parseFilterId,
+  tokenizeFilterInput,
+} from '../filters'
 import { ColumnFiltersState } from '@tanstack/react-table'
 
 // Simple feature extension type
@@ -33,6 +40,8 @@ export interface FilterState {
   setSearchValue: (value: string) => void
   setAvailableFilters: () => void
   toggleFilter: (filter: FilterOption) => void
+  setFieldFilter: (fieldId: string, operator: ComparisonOperator, value: unknown) => boolean
+  removeFieldFilter: (fieldId: string) => void
   isFilterActive: (filterId: string) => boolean
   clearFilters: () => void
   syncFiltersFromSearchValue: () => void
@@ -41,67 +50,17 @@ export interface FilterState {
   [key: string]: any
 }
 
-// Helper to extract field and operator from a filter ID
-const parseFilterId = (id: string) => {
-  const parts = id.split(':')
-  return { 
-    field: parts[0], 
-    operator: parts.length > 1 ? parts[1] : undefined 
-  }
-}
-
-// Get the preferred display identifier for a field
-const getPreferredFieldIdentifier = (field: string, filterProcessor: FilterProcessor): string => {
-  const fieldDef = filterProcessor.getFilterField(field)
-  if (!fieldDef) return field
-  
-  // Always prefer the first alias if available
-  if (fieldDef.aliases?.length) return fieldDef.aliases[0]
-  
-  // Use displayName if available
-  if (fieldDef.displayName) return fieldDef.displayName
-  
-  // Fall back to the field ID
-  return field
-}
-
-// Helper function to format dates without external dependencies
-const formatDateValue = (date: Date): string => {
-  // Use client-side only date comparison to prevent hydration mismatches
-  if (typeof window === 'undefined') {
-    // On server, always format as YYYY-M-D to avoid dynamic comparisons
-    const year = date.getFullYear()
-    const month = date.getMonth() + 1
-    const day = date.getDate()
-    return `${year}-${month}-${day}`
-  }
-
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  
-  const inputDate = new Date(date)
-  inputDate.setHours(0, 0, 0, 0)
-  
-  if (inputDate.getTime() === today.getTime()) {
-    return 'today'
-  } else if (inputDate.getTime() === yesterday.getTime()) {
-    return 'yesterday'
-  } else if (inputDate.getTime() === tomorrow.getTime()) {
-    return 'tomorrow'
-  } else {
-    // Format as YYYY-M-D (without leading zeros for month/day)
-    const year = inputDate.getFullYear()
-    const month = inputDate.getMonth() + 1
-    const day = inputDate.getDate()
-    return `${year}-${month}-${day}`
-  }
-}
+const removeFieldTokens = (
+  searchValue: string,
+  fieldId: string,
+  filterProcessor: FilterProcessor,
+): string => tokenizeFilterInput(searchValue)
+  .filter(token => {
+    const parsed = filterProcessor.parseFilterToken(token)
+    return !parsed || parseFilterId(parsed.id).field !== fieldId
+  })
+  .join(' ')
+  .trim()
 
 // Simpler filter store creation without persistence
 export function createFilterStore(
@@ -118,24 +77,6 @@ export function createFilterStore(
   const filterProcessor = new FilterProcessor({
     filterFields,
     searchFields
-  })
-  
-  // Create alias map for faster lookups
-  const fieldAliasMap = new Map<string, string>()
-  
-  // Build alias map
-  ;[...filterFields, ...searchFields].forEach(field => {
-    if (field.aliases?.length) {
-      // Set the preferred display name (first alias) for this field
-      fieldAliasMap.set(field.id, field.aliases[0])
-      
-      // Map all aliases back to the field ID
-      field.aliases.forEach(alias => {
-        fieldAliasMap.set(alias, field.id)
-      })
-    } else if (field.displayName) {
-      fieldAliasMap.set(field.id, field.displayName)
-    }
   })
   
   return create<FilterState>()(
@@ -169,103 +110,73 @@ export function createFilterStore(
         get().syncFiltersFromSearchValue()
       },
       
-      // Clear all filters
-      clearFilters: () => set({ 
-        filters: [],
-        appliedFilters: new Set(),
-        searchValue: '',
-        filterSearchTerms: new Map()
-      }),
+      // Clear structured column filters while preserving the quick-search text.
+      clearFilters: () => {
+        const searchValue = tokenizeFilterInput(get().searchValue)
+          .filter(token => !filterProcessor.parseFilterToken(token))
+          .join(' ')
+          .trim()
+        set({
+          filters: filterProcessor.extractFilters(searchValue),
+          appliedFilters: new Set(),
+          searchValue,
+          filterSearchTerms: new Map(),
+        })
+      },
       
       // Toggle a filter on/off
       toggleFilter: (filter) => {
         const state = get()
-        const filterId = filter.id
-        const isActive = state.isFilterActive(filterId)
-        
-        if (isActive) {
-          // Remove filter
-          const { field } = parseFilterId(filterId)
-          const newFilters = state.filters.filter(f => {
-            const id = f.id as string
-            return !id.startsWith(field + ':') && id !== field
-          })
-          
-          // Update appliedFilters
-          const newApplied = new Set(state.appliedFilters)
-          newApplied.delete(filterId)
-          
-          // Get the search term to remove
-          const searchTerm = state.filterSearchTerms.get(filterId) || ''
-          
-          // Update search value and filter search terms
-          const newSearchValue = state.searchValue
-            .replace(searchTerm, '')
-            .replace(/\s+/g, ' ')
-            .trim()
-            
-          const newSearchTerms = new Map(state.filterSearchTerms)
-          newSearchTerms.delete(filterId)
-          
-          set({ 
-            filters: newFilters,
-            appliedFilters: newApplied,
-            searchValue: newSearchValue,
-            filterSearchTerms: newSearchTerms
-          })
-        } else {
-          // Add filter
-          const { field, operator } = parseFilterId(filterId)
-          
-          // Create filter object - important to use original field ID for internal filter
-          const newFilter = {
-            id: operator ? `${field}:${operator}` : field,
-            value: filter.value
-          }
-          
-          // Format for search using the preferred field identifier (alias)
-          // Always use the alias from our map if available, fall back to getPreferredFieldIdentifier
-          const displayField = fieldAliasMap.get(field) || getPreferredFieldIdentifier(field, filterProcessor)
-          
-          // Format the value based on field type for search term display
-          let displayValue: string;
-          const fieldDef = filterProcessor.getFilterField(field);
-          
-          if (fieldDef?.type === 'date' && filter.value instanceof Date) {
-            // Format date value for display in search bar using our helper
-            displayValue = formatDateValue(filter.value)
-          } else {
-            displayValue = String(filter.value);
-          }
-          
-          // Create the search term with the display field
-          let searchTerm
-          if (operator) {
-            searchTerm = `${displayField}:${operator}${displayValue}`
-          } else {
-            searchTerm = `${displayField}:${displayValue}`
-          }
-          
-          // Update appliedFilters
-          const newApplied = new Set(state.appliedFilters)
-          newApplied.add(filterId)
-          
-          // Update search terms map
-          const newSearchTerms = new Map(state.filterSearchTerms)
-          newSearchTerms.set(filterId, searchTerm)
-          
-          // Update search value
-          const newSearchValue = state.searchValue
-            ? `${state.searchValue} ${searchTerm}`
-            : searchTerm
-          
-          set({ 
-            filters: [...state.filters, newFilter],
-            appliedFilters: newApplied,
-            searchValue: newSearchValue,
-            filterSearchTerms: newSearchTerms
-          })
-        }
+        const field = filter.field || filter.id.split(':')[0]
+        if (state.isFilterActive(filter.id)) state.removeFieldFilter(field)
+        else state.setFieldFilter(
+          field,
+          (filter.operator || filterProcessor.getFilterField(field)?.defaultOperator || '*') as ComparisonOperator,
+          filter.value,
+        )
+      },
+
+      setFieldFilter: (fieldId, operator, value) => {
+        const state = get()
+        const newFilter = filterProcessor.createFilter(fieldId, operator, value)
+        if (!newFilter) return false
+
+        const canonicalField = parseFilterId(newFilter.id).field
+        const searchTerm = filterProcessor.serializeFilter(newFilter)
+        if (!searchTerm) return false
+
+        const filters = state.filters.filter(filter => parseFilterId(String(filter.id)).field !== canonicalField)
+        const searchWithoutField = removeFieldTokens(state.searchValue, canonicalField, filterProcessor)
+        const filterId = newFilter.id
+
+        set({
+          filters: [...filters, newFilter],
+          appliedFilters: new Set([
+            ...Array.from(state.appliedFilters).filter(id => parseFilterId(id).field !== canonicalField),
+            filterId,
+          ]),
+          filterSearchTerms: new Map([
+            ...Array.from(state.filterSearchTerms.entries()).filter(([id]) => parseFilterId(id).field !== canonicalField),
+            [filterId, searchTerm],
+          ]),
+          searchValue: searchWithoutField ? `${searchWithoutField} ${searchTerm}` : searchTerm,
+        })
+        return true
+      },
+
+      removeFieldFilter: (fieldId) => {
+        const state = get()
+        const field = filterProcessor.getFilterField(fieldId)?.id || fieldId
+        set({
+          filters: state.filters.filter(filter => parseFilterId(String(filter.id)).field !== field),
+          appliedFilters: new Set(
+            Array.from(state.appliedFilters).filter(id => parseFilterId(id).field !== field),
+          ),
+          filterSearchTerms: new Map(
+            Array.from(state.filterSearchTerms.entries()).filter(([id]) => parseFilterId(id).field !== field),
+          ),
+          searchValue: removeFieldTokens(state.searchValue, field, filterProcessor),
+        })
       },
       
       // Check if a filter is active
@@ -276,14 +187,15 @@ export function createFilterStore(
         if (appliedFilters.has(filterId)) return true
         
         // Check if filter ID matches a filter in the list
+        const hasOperator = filterId.includes(':')
         const { field, operator } = parseFilterId(filterId)
         
         return filters.some(f => {
-          const id = f.id as string
-          if (operator) {
-            return id === `${field}:${operator}`
+          const parsed = parseFilterId(String(f.id))
+          if (hasOperator) {
+            return parsed.field === field && parsed.operator === operator
           } else {
-            return id === field || id.startsWith(`${field}:`)
+            return parsed.field === field
           }
         })
       },
@@ -323,7 +235,7 @@ export function createFilterStore(
           
           // Lookup available filter that matches this field
           const matchingFilter = availableFilters.find(af => {
-            const { field } = parseFilterId(af.id)
+          const { field } = parseFilterId(af.id)
             return field === fieldDef.id
           })
           
@@ -359,17 +271,14 @@ export function createFilterStore(
       },
       {
         name,
-        partialize: (state) => ({ 
-          filters: state.filters,
-          searchValue: state.searchValue,
-          appliedFilters: Array.from(state.appliedFilters),
-          filterSearchTerms: Array.from(state.filterSearchTerms.entries())
-        }),
+        // searchValue is the durable representation. Re-parsing it avoids
+        // corrupted Date/RegExp values after JSON persistence.
+        partialize: (state) => ({ searchValue: state.searchValue }),
         onRehydrateStorage: () => (state) => {
           if (state) {
-            // Convert arrays back to Sets and Maps
-            state.appliedFilters = new Set(state.appliedFilters || [])
-            state.filterSearchTerms = new Map(state.filterSearchTerms || [])
+            state.appliedFilters = new Set()
+            state.filterSearchTerms = new Map()
+            state.syncFiltersFromSearchValue()
           }
         },
       }
@@ -392,4 +301,4 @@ export function createEntityFilterStore(
     searchFields, 
     options
   )
-} 
+}

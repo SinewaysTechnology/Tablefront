@@ -20,7 +20,14 @@ export {
 export { createDataTable, createAutoDataTable, createSimpleDataTable } from './stores/createDataTable'
 export type { CreateDataTableConfig, DataTableSetup } from './stores/createDataTable'
 
-export { FilterProcessor } from './filters'
+export {
+  FilterProcessor,
+  FILTER_OPERATORS,
+  FILTER_OPERATOR_LABELS,
+  parseFilterId,
+  tokenizeFilterInput,
+} from './filters'
+export type { ComparisonOperator, FilterOption } from './filters'
 
 export { useTableStyles } from './variants'
 export type { TableStyles } from './variants'

@@ -1459,6 +1459,7 @@ export function DataTable<TData>({
                       customStaticRowsSticky && customStaticRows.length > 0 && 'border-b-0',
                     )}
                     ref={headerRef}
+                    {...(dragState.isDragging ? { 'data-tf-column-dragging': '' } : {})}
                     // Keep the header above sticky static rows (z-index 10) and
                     // transformed body cells during resize/reorder animations.
                     style={{ zIndex: 20 }}
@@ -1510,10 +1511,6 @@ export function DataTable<TData>({
                           }
                           
                           const isDragging = dragState.isDragging && dragState.draggedColumnId === columnId;
-                          const isDragTarget =
-                            dragState.isDragging &&
-                            !isDragging &&
-                            dragState.dropTargetColumnId === columnId;
                           
                           return (
                             <th 
@@ -1533,9 +1530,8 @@ export function DataTable<TData>({
                               className={cn(
                                 tableStyles.table.tableHeaderCell,
                                 canSort && "cursor-pointer select-none",
-                                enableColumnDrag && "transition-[transform,opacity,background-color,box-shadow] duration-200 ease-out",
+                                enableColumnDrag && "transition-[transform,opacity] duration-200 ease-out",
                                 isDragging && tableStyles.dragDrop.dragSource,
-                                isDragTarget && tableStyles.dragDrop.dragTarget,
                                 enableColumnResize && "relative",
                                 meta.className
                               )}

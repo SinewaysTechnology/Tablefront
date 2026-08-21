@@ -110,9 +110,8 @@ export function useDataTableSearch<TData>({
   const handleClearFilters = useCallback(() => {
     if (filterProcessor && clearFilters) {
       clearFilters()
-      resetSearch()
     }
-  }, [filterProcessor, clearFilters, resetSearch])
+  }, [filterProcessor, clearFilters])
 
   // ============================================================================
   // RETURN SEARCH LOGIC
@@ -137,4 +136,4 @@ export function useDataTableSearch<TData>({
     // Debounced search
     debouncedSetStoreSearchValue,
   }
-} 
+}

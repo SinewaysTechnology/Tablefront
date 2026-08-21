@@ -34,15 +34,55 @@ const inferDataType = (values: any[]): FilterDataType => {
   return 'string'
 }
 
+const rankValuesByFrequency = (values: any[]): string[] => {
+  const nonNullValues = values.filter(v => v != null && v !== '')
+  const counts = new Map<string, number>()
+  nonNullValues.forEach((value) => {
+    const normalizedValue = String(value)
+    counts.set(normalizedValue, (counts.get(normalizedValue) || 0) + 1)
+  })
+
+  return Array.from(counts)
+    .sort(([leftValue, leftCount], [rightValue, rightCount]) =>
+      rightCount - leftCount || leftValue.localeCompare(rightValue),
+    )
+    .map(([value]) => value)
+}
+
 const extractPreferredValues = (values: any[], maxValues = 20): string[] | undefined => {
   const nonNullValues = values.filter(v => v != null && v !== '')
-  const uniqueValues = Array.from(new Set(nonNullValues.map(v => String(v))))
+  const rankedValues = rankValuesByFrequency(values)
   
-  if (uniqueValues.length <= maxValues && uniqueValues.length <= nonNullValues.length * 0.8) {
-    return uniqueValues.sort()
+  if (rankedValues.length <= maxValues && rankedValues.length <= nonNullValues.length * 0.8) {
+    return rankedValues
   }
   
   return undefined
+}
+
+const extractNumericDefault = (values: any[]): number | undefined => {
+  const numbers = values
+    .map((value) => typeof value === 'number' ? value : Number(value))
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right)
+  if (!numbers.length) return undefined
+
+  const usefulNumbers = numbers.some((value) => value > 0)
+    ? numbers.filter((value) => value > 0)
+    : numbers
+  const middle = Math.floor(usefulNumbers.length / 2)
+  const median = usefulNumbers.length % 2 === 0
+    ? (usefulNumbers[middle - 1] + usefulNumbers[middle]) / 2
+    : usefulNumbers[middle]
+  return Number(median.toPrecision(6))
+}
+
+const extractLatestDate = (values: any[]): string | undefined => {
+  const timestamps = values
+    .map((value) => value instanceof Date ? value.getTime() : new Date(value).getTime())
+    .filter((value) => Number.isFinite(value))
+  if (!timestamps.length) return undefined
+  return new Date(Math.max(...timestamps)).toISOString().slice(0, 10)
 }
 
 export interface FieldOverrides<TData = any> {
@@ -72,6 +112,7 @@ export function autoGenerateFields<TData>(
     sampleSize?: number
     maxPreferredValues?: number
     excludeFields?: (keyof TData)[]
+    fieldLabels?: Record<string, string>
   }
 ): { filters: FilterField[], searches: FilterField[] } {
   if (!data.length) return { filters: [], searches: [] }
@@ -80,7 +121,8 @@ export function autoGenerateFields<TData>(
     idField = 'id' as keyof TData,
     sampleSize = 100,
     maxPreferredValues = 20,
-    excludeFields = []
+    excludeFields = [],
+    fieldLabels = {},
   } = options || {}
   
   const sampleData = data.slice(0, sampleSize)
@@ -104,22 +146,37 @@ export function autoGenerateFields<TData>(
     const sampleValues = sampleData.map(row => (row as unknown as Record<string, unknown>)[fieldStr])
     
     const dataType = inferDataType(sampleValues)
+    const fieldLabel = fieldLabels[fieldStr]?.trim() || formatFieldName(fieldStr)
     
     const baseField: FilterField = {
       id: fieldStr,
-      label: formatFieldName(fieldStr),
+      label: fieldLabel,
       type: dataType,
-      description: `Filter by ${formatFieldName(fieldStr).toLowerCase()}`
+      description: `Filter by ${fieldLabel.toLowerCase()}`,
+      ...(fieldLabel !== fieldStr && { aliases: [fieldLabel] }),
     }
     
     if (dataType === 'string') {
       const preferredValues = extractPreferredValues(sampleValues, maxPreferredValues)
+      const suggestedValue = rankValuesByFrequency(sampleValues)[0]
       if (preferredValues) {
         baseField.preferredValues = preferredValues
       }
+      if (suggestedValue) {
+        baseField.suggestedValue = suggestedValue
+      }
     } else if (dataType === 'number') {
-      baseField.defaultOperator = '>'
-      baseField.defaultNumericValue = 0
+      const defaultNumericValue = extractNumericDefault(sampleValues)
+      baseField.defaultOperator = defaultNumericValue === 0 ? '>' : '>='
+      if (defaultNumericValue !== undefined) {
+        baseField.defaultNumericValue = defaultNumericValue
+      }
+    } else if (dataType === 'date') {
+      const suggestedValue = extractLatestDate(sampleValues)
+      baseField.defaultOperator = '='
+      if (suggestedValue) {
+        baseField.suggestedValue = suggestedValue
+      }
     }
     
     if (!isIdField) {
@@ -143,7 +200,8 @@ export function autoGenerateFields<TData>(
 
 export function applyFieldOverrides<TData>(
   generatedFields: { filters: FilterField[], searches: FilterField[] },
-  fieldOverrides: FieldOverrides<TData> = {}
+  fieldOverrides: FieldOverrides<TData> = {},
+  fieldLabels: Record<string, string> = {},
 ): { filters: FilterField[], searches: FilterField[] } {
   const { filters: baseFilters, searches: baseSearches } = generatedFields
   
@@ -163,7 +221,9 @@ export function applyFieldOverrides<TData>(
         ...(override.type && { type: override.type }),
         ...(override.description && { description: override.description }),
         ...(override.path && { path: override.path }),
-        ...(override.aliases && { aliases: override.aliases }),
+        ...(override.aliases && {
+          aliases: Array.from(new Set([...(field.aliases || []), ...override.aliases])),
+        }),
         ...(override.preferredValues && { preferredValues: override.preferredValues }),
         ...(override.defaultNumericValue !== undefined && { defaultNumericValue: override.defaultNumericValue }),
         ...(override.defaultOperator && { defaultOperator: override.defaultOperator }),
@@ -191,7 +251,9 @@ export function applyFieldOverrides<TData>(
         ...(override.type && { type: override.type }),
         ...(override.description && { description: override.description }),
         ...(override.path && { path: override.path }),
-        ...(override.aliases && { aliases: override.aliases }),
+        ...(override.aliases && {
+          aliases: Array.from(new Set([...(field.aliases || []), ...override.aliases])),
+        }),
         ...(override.preferredValues && { preferredValues: override.preferredValues }),
         ...(override.defaultNumericValue !== undefined && { defaultNumericValue: override.defaultNumericValue }),
         ...(override.defaultOperator && { defaultOperator: override.defaultOperator }),
@@ -210,12 +272,17 @@ export function applyFieldOverrides<TData>(
     if ((override.filterable === true || override.filterOnly === true) && !existsInFilters) {
       const newField: FilterField = {
         id: fieldId,
-        label: override.label || formatFieldName(fieldId),
+        label: override.label || fieldLabels[fieldId] || formatFieldName(fieldId),
         type: override.type || 'string',
-        description: override.description || `Filter by ${(override.label || formatFieldName(fieldId)).toLowerCase()}`,
+        description: override.description || `Filter by ${(override.label || fieldLabels[fieldId] || formatFieldName(fieldId)).toLowerCase()}`,
         ...(override.displayName && { displayName: override.displayName }),
         ...(override.path && { path: override.path }),
-        ...(override.aliases && { aliases: override.aliases }),
+        ...((fieldLabels[fieldId] || override.aliases) && {
+          aliases: Array.from(new Set([
+            ...(fieldLabels[fieldId] && fieldLabels[fieldId] !== fieldId ? [fieldLabels[fieldId]] : []),
+            ...(override.aliases || []),
+          ])),
+        }),
         ...(override.preferredValues && { preferredValues: override.preferredValues }),
         ...(override.defaultNumericValue !== undefined && { defaultNumericValue: override.defaultNumericValue }),
         ...(override.defaultOperator && { defaultOperator: override.defaultOperator }),
@@ -228,12 +295,17 @@ export function applyFieldOverrides<TData>(
     if ((override.searchable === true || override.searchOnly === true) && !existsInSearches) {
       const newField: FilterField = {
         id: fieldId,
-        label: override.label || formatFieldName(fieldId),
+        label: override.label || fieldLabels[fieldId] || formatFieldName(fieldId),
         type: override.type || 'string',
-        description: override.description || `Search by ${(override.label || formatFieldName(fieldId)).toLowerCase()}`,
+        description: override.description || `Search by ${(override.label || fieldLabels[fieldId] || formatFieldName(fieldId)).toLowerCase()}`,
         ...(override.displayName && { displayName: override.displayName }),
         ...(override.path && { path: override.path }),
-        ...(override.aliases && { aliases: override.aliases }),
+        ...((fieldLabels[fieldId] || override.aliases) && {
+          aliases: Array.from(new Set([
+            ...(fieldLabels[fieldId] && fieldLabels[fieldId] !== fieldId ? [fieldLabels[fieldId]] : []),
+            ...(override.aliases || []),
+          ])),
+        }),
         ...(override.preferredValues && { preferredValues: override.preferredValues }),
         ...(override.defaultNumericValue !== undefined && { defaultNumericValue: override.defaultNumericValue }),
         ...(override.defaultOperator && { defaultOperator: override.defaultOperator }),
@@ -255,9 +327,10 @@ export function buildFields<TData>(
     sampleSize?: number
     maxPreferredValues?: number
     excludeFields?: (keyof TData)[]
+    fieldLabels?: Record<string, string>
   }
 ): { filters: FilterField[], searches: FilterField[] } {
   const generatedFields = autoGenerateFields(data, options)
   
-  return applyFieldOverrides(generatedFields, fieldOverrides)
-} 
+  return applyFieldOverrides(generatedFields, fieldOverrides, options?.fieldLabels)
+}

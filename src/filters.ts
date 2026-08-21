@@ -1,11 +1,72 @@
 import { ColumnFiltersState } from "@tanstack/react-table";
-import { startOfDay } from 'date-fns';
-import { toDate } from 'date-fns-tz';
 import { parseDate } from './utils';
 
 export type FilterDataType = 'number' | 'string' | 'date'
 
 export type ComparisonOperator = '>' | '<' | '>=' | '<=' | '=' | '!=' | '*' | '!*'
+
+export const FILTER_OPERATORS: Record<FilterDataType, ComparisonOperator[]> = {
+    string: ['*', '=', '!*', '!='],
+    number: ['=', '!=', '>', '>=', '<', '<='],
+    date: ['=', '!=', '>', '>=', '<', '<='],
+}
+
+export const FILTER_OPERATOR_LABELS: Record<ComparisonOperator, string> = {
+    '*': 'contains',
+    '!*': 'does not contain',
+    '=': 'equals',
+    '!=': 'does not equal',
+    '>': 'is greater than',
+    '>=': 'is at least',
+    '<': 'is less than',
+    '<=': 'is at most',
+}
+
+export const parseFilterId = (id: string): { field: string, operator: ComparisonOperator } => {
+    const [field, rawOperator] = id.split(':')
+    const operator = FILTER_OPERATOR_LABELS[rawOperator as ComparisonOperator]
+        ? rawOperator as ComparisonOperator
+        : '='
+    return { field, operator }
+}
+
+export const tokenizeFilterInput = (input: string): string[] =>
+    input.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []
+
+const quoteFilterValue = (value: string): string =>
+    /\s/.test(value) ? JSON.stringify(value) : value
+
+const quoteFieldIdentifier = (field: string): string =>
+    /\s/.test(field) ? JSON.stringify(field) : field
+
+const startOfUtcDay = (date: Date): Date =>
+    new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+
+const parseFilterDate = (value: unknown): Date | null => {
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : startOfUtcDay(value)
+    }
+
+    if (typeof value === 'number') {
+        const date = new Date(value)
+        return Number.isNaN(date.getTime()) ? null : startOfUtcDay(date)
+    }
+
+    const input = String(value ?? '').trim()
+    if (!input) return null
+
+    const relative = input.toLowerCase()
+    if (relative === 'today' || relative === 'yesterday' || relative === 'tomorrow') {
+        const date = startOfUtcDay(new Date())
+        date.setUTCDate(date.getUTCDate() + (relative === 'yesterday' ? -1 : relative === 'tomorrow' ? 1 : 0))
+        return date
+    }
+
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(input)
+        ? new Date(`${input}T00:00:00.000Z`)
+        : parseDate(input, 'UTC')
+    return parsed && !Number.isNaN(parsed.getTime()) ? startOfUtcDay(parsed) : null
+}
 
 export interface FilterOption {
     id: string;       // Unique identifier (e.g., "impressions:gt:0")
@@ -13,7 +74,7 @@ export interface FilterOption {
     type: 'comparison' | 'categorical';  // Type of filter
     field: string;    // Field name (e.g., "impressions")
     operator?: string; // Comparison operator (e.g., "gt", "contains")
-    value: number | string | RegExp; // Filter value
+    value: number | string | RegExp | Date; // Filter value
     originalDisplay?: string; // Original text for display
 }
 
@@ -56,7 +117,11 @@ export class FilterProcessor {
     // Build lookup map for fields and their aliases
     this.fieldsById = [...config.filterFields, ...config.searchFields].reduce((map, field) => {
       map[field.id] = field;
-      field.aliases?.forEach(alias => map[alias] = field);
+      map[field.id.toLowerCase()] = field;
+      field.aliases?.forEach(alias => {
+        map[alias] = field
+        map[alias.toLowerCase()] = field
+      });
       return map;
     }, {} as Record<string, FilterField>);
   }
@@ -84,7 +149,7 @@ export class FilterProcessor {
   }
     
     getFieldValue(item: any, fieldId: string, context?: any): any {
-        const field = this.fieldsById[fieldId];
+        const field = this.fieldsById[fieldId] || this.fieldsById[fieldId.toLowerCase()];
         if (!field) return undefined;
         
         if (field.path) {
@@ -92,8 +157,7 @@ export class FilterProcessor {
                 return field.path(item);
             }
             
-            const value = this.resolvePath(item, field.path);
-            return value === undefined && field.type === 'number' ? 0 : value;
+            return this.resolvePath(item, field.path);
         }
         
         return item[fieldId];
@@ -103,75 +167,62 @@ export class FilterProcessor {
         const id = filter.id as string;
         
         if (id === '_search') {
-            const searchValue = String(filter.value).toLowerCase();
-            if (!searchValue) return true;
-            
-            // Optimized search - use for loop instead of some() for better performance
+            const searchTerms = (Array.isArray(filter.value) ? filter.value : String(filter.value).split(/\s+/))
+                .map(value => String(value).trim().toLocaleLowerCase())
+                .filter(Boolean)
+            if (!searchTerms.length) return true;
+
             const searchFields = this.config.searchFields;
-            const searchFieldsLength = searchFields.length;
-            
-            for (let i = 0; i < searchFieldsLength; i++) {
-                const field = searchFields[i];
-                const value = this.getFieldValue(item, field.id, context);
-                if (value !== undefined && String(value).toLowerCase().includes(searchValue)) {
-                    return true;
+            for (let termIndex = 0; termIndex < searchTerms.length; termIndex++) {
+                let termMatched = false
+                for (let fieldIndex = 0; fieldIndex < searchFields.length; fieldIndex++) {
+                    const value = this.getFieldValue(item, searchFields[fieldIndex].id, context);
+                    if (value != null && String(value).toLocaleLowerCase().includes(searchTerms[termIndex])) {
+                        termMatched = true
+                        break
+                    }
                 }
+                if (!termMatched) return false
             }
-            return false;
+            return true;
         }
         
         const [field, operator = '='] = id.split(':') as [string, ComparisonOperator];
-        const fieldDef = this.fieldsById[field];
+        const fieldDef = this.fieldsById[field] || this.fieldsById[field.toLowerCase()];
         if (!fieldDef) return true;
         
         const rawValue = this.getFieldValue(item, field, context);
-        const effectiveValue = rawValue === undefined && fieldDef.type === 'number' ? 0 : rawValue;
+        const effectiveValue = rawValue;
         
-        if (effectiveValue === undefined) return operator === '!=' || operator === '!*';
+        if (effectiveValue === undefined || effectiveValue === null) return operator === '!=' || operator === '!*';
         
         // Numeric comparisons
         if (fieldDef.type === 'number' && ['<', '>', '<=', '>=', '=', '!='].includes(operator)) {
             const numVal = typeof filter.value === 'number' ? filter.value : parseFloat(String(filter.value));
             if (isNaN(numVal)) return false;
             
+            const fieldNumber = typeof effectiveValue === 'number' ? effectiveValue : Number(effectiveValue)
+            if (!Number.isFinite(fieldNumber)) return false
             switch (operator) {
-                case '<': return effectiveValue < numVal;
-                case '>': return effectiveValue > numVal;
-                case '<=': return effectiveValue <= numVal;
-                case '>=': return effectiveValue >= numVal;
-                case '=': return effectiveValue === numVal;
-                case '!=': return effectiveValue !== numVal;
+                case '<': return fieldNumber < numVal;
+                case '>': return fieldNumber > numVal;
+                case '<=': return fieldNumber <= numVal;
+                case '>=': return fieldNumber >= numVal;
+                case '=': return fieldNumber === numVal;
+                case '!=': return fieldNumber !== numVal;
                 default: return false;
             }
         }
         
         // Date comparisons
         if (fieldDef.type === 'date' && ['<', '>', '<=', '>=', '=', '!='].includes(operator)) {
-            // Convert field value to Date object
-            let fieldDate: Date;
-            try {
-                if (effectiveValue instanceof Date) {
-                    fieldDate = effectiveValue;
-                } else if (typeof effectiveValue === 'string') {
-                    // Use parseDate utility for consistent parsing
-                    const parsedDate = parseDate(effectiveValue, 'UTC');
-                    if (!parsedDate) return false;
-                    fieldDate = parsedDate;
-                } else {
-                    return false;
-                }
-                // Normalize to start of day in UTC for consistent comparisons
-                fieldDate = toDate(startOfDay(fieldDate), { timeZone: 'UTC' });
-            } catch {
-                return false;
-            }
-            
-            // Ensure filter value is a Date
-            if (!(filter.value instanceof Date)) return false;
+            const fieldDate = parseFilterDate(effectiveValue)
+            const filterDate = parseFilterDate(filter.value)
+            if (!fieldDate || !filterDate) return false
             
             // Compare timestamps
             const fieldTime = fieldDate.getTime();
-            const filterTime = filter.value.getTime();
+            const filterTime = filterDate.getTime();
             
             switch (operator) {
                 case '<': return fieldTime < filterTime;
@@ -187,17 +238,23 @@ export class FilterProcessor {
         // String operations
         if (fieldDef.type === 'string') {
             const strValue = String(effectiveValue);
+            const normalizedValue = strValue.toLocaleLowerCase()
+            const normalizedFilter = String(filter.value).toLocaleLowerCase()
             switch (operator) {
-                case '=': return effectiveValue === filter.value;
-                case '!=': return effectiveValue !== filter.value;
+                case '=': return normalizedValue === normalizedFilter;
+                case '!=': return normalizedValue !== normalizedFilter;
                 case '*': 
-                    return filter.value instanceof RegExp
-                        ? filter.value.test(strValue)
-                        : strValue.toLowerCase().includes(String(filter.value).toLowerCase());
+                    if (filter.value instanceof RegExp) {
+                        filter.value.lastIndex = 0
+                        return filter.value.test(strValue)
+                    }
+                    return normalizedValue.includes(normalizedFilter);
                 case '!*': 
-                    return filter.value instanceof RegExp
-                        ? !filter.value.test(strValue)
-                        : !strValue.toLowerCase().includes(String(filter.value).toLowerCase());
+                    if (filter.value instanceof RegExp) {
+                        filter.value.lastIndex = 0
+                        return !filter.value.test(strValue)
+                    }
+                    return !normalizedValue.includes(normalizedFilter);
                 default: return false;
             }
         }
@@ -212,14 +269,14 @@ export class FilterProcessor {
         const isNegative = token.startsWith('-');
         const normalizedToken = isNegative ? token.substring(1) : token;
         
-        const match = normalizedToken.match(/^([\w.]+):((>=|<=|>|<|=))?([^:]*)$/);
+        const match = normalizedToken.match(/^("[^"]+"|'[^']+'|[\w.-]+):(!\*|!=|>=|<=|>|<|=|\*)?(.+)$/);
         if (!match) return null;
         
-        const fieldId = match[1];
-        const operator = match[3] || '';
-        const valueStr = match[4];
+        const fieldId = match[1].replace(/^(["'])(.*)\1$/, '$2');
+        const operator = match[2] || '';
+        const valueStr = match[3].replace(/^(["'])(.*)\1$/, '$2');
         
-        const fieldDef = this.fieldsById[fieldId];
+        const fieldDef = this.fieldsById[fieldId] || this.fieldsById[fieldId.toLowerCase()];
         if (!fieldDef) return null;
         
         const actualFieldId = fieldDef.id;
@@ -227,7 +284,10 @@ export class FilterProcessor {
         let finalValue: string | number | RegExp | Date;
         
         // Handle negation by mapping operators to their opposites
-        const negatedOps: Record<string, string> = { '>': '<=', '<': '>=', '>=': '<', '<=': '>', '=': '!=', '': '!*' };
+        const negatedOps: Record<string, string> = {
+            '>': '<=', '<': '>=', '>=': '<', '<=': '>',
+            '=': '!=', '!=': '=', '*': '!*', '!*': '*', '': '!*',
+        };
         
         if (fieldDef.type === 'number') {
             finalValue = parseFloat(valueStr);
@@ -241,29 +301,8 @@ export class FilterProcessor {
         } 
         else if (fieldDef.type === 'date') {
             // Handle date parsing and special values
-            let dateValue: Date;
-            
-            if (valueStr.toLowerCase() === 'today') {
-                // Use fixed date for SSR consistency - in real apps this could be updated after hydration
-                dateValue = toDate(startOfDay(new Date('2024-01-01')), { timeZone: 'UTC' });
-            } else if (valueStr.toLowerCase() === 'yesterday') {
-                // Use fixed date for SSR consistency
-                dateValue = toDate(startOfDay(new Date('2023-12-31')), { timeZone: 'UTC' });
-            } else if (valueStr.toLowerCase() === 'tomorrow') {
-                // Use fixed date for SSR consistency
-                dateValue = toDate(startOfDay(new Date('2024-01-02')), { timeZone: 'UTC' });
-            } else {
-                // For SSR safety, always use consistent date parsing
-                try {
-                    // Ensure we parse ISO date strings consistently
-                    const isoDate = valueStr.includes('T') 
-                        ? valueStr 
-                        : `${valueStr}T00:00:00.000Z`;
-                    dateValue = toDate(startOfDay(new Date(isoDate)), { timeZone: 'UTC' });
-                } catch {
-                    return null;
-                }
-            }
+            const dateValue = parseFilterDate(valueStr)
+            if (!dateValue) return null
             
             finalValue = dateValue;
             finalOperator = isNegative 
@@ -306,7 +345,50 @@ export class FilterProcessor {
      * Gets a specific filter field by ID
      */
     getFilterField(id: string): FilterField | undefined {
-        return this.fieldsById[id];
+        return this.fieldsById[id] || this.fieldsById[id.toLowerCase()];
+    }
+
+    /** Build a validated, canonical filter from UI or API input. */
+    createFilter(fieldId: string, operator: ComparisonOperator, rawValue: unknown): { id: string, value: any } | null {
+        const field = this.getFilterField(fieldId)
+        if (!field || !FILTER_OPERATORS[field.type].includes(operator)) return null
+
+        let value: string | number | Date
+        if (field.type === 'number') {
+            const numberValue = typeof rawValue === 'number' ? rawValue : Number(String(rawValue).trim())
+            if (!Number.isFinite(numberValue)) return null
+            value = field.isPercentage ? numberValue / 100 : numberValue
+        } else if (field.type === 'date') {
+            const dateValue = parseFilterDate(rawValue)
+            if (!dateValue) return null
+            value = dateValue
+        } else {
+            value = String(rawValue ?? '').trim()
+            if (!value) return null
+        }
+
+        return { id: `${field.id}:${operator}`, value }
+    }
+
+    /** Convert a canonical filter into the backwards-compatible search token. */
+    serializeFilter(filter: { id: string, value: any }): string | null {
+        const { field, operator } = parseFilterId(filter.id)
+        const fieldDef = this.getFilterField(field)
+        if (!fieldDef) return null
+
+        let value: string
+        if (fieldDef.type === 'date') {
+            const date = parseFilterDate(filter.value)
+            if (!date) return null
+            value = date.toISOString().slice(0, 10)
+        } else if (fieldDef.type === 'number' && fieldDef.isPercentage) {
+            value = String(Number(filter.value) * 100)
+        } else {
+            value = String(filter.value)
+        }
+
+        const preferredAlias = fieldDef.aliases?.[0] || fieldDef.id
+        return `${quoteFieldIdentifier(preferredAlias)}:${operator}${quoteFilterValue(value)}`
     }
     
     /**
@@ -316,34 +398,30 @@ export class FilterProcessor {
         const trimmedValue = searchValue.trim();
         if (!trimmedValue) return [];
         
-        const tokens = trimmedValue.split(/\s+/);
+        const tokens = tokenizeFilterInput(trimmedValue);
         const tokensLength = tokens.length;
         
-        // Parse structured filters (field:value)
         const structuredFilters: ColumnFiltersState = [];
-        
-        for (let i = 0; i < tokensLength; i++) {
-            const token = tokens[i];
-            if (token.match(/^-?[\w.]+:/) && !token.match(/^-?[\w.]+:$/)) {
-                const parsedFilter = this.parseFilterToken(token);
-                if (parsedFilter) {
-                    structuredFilters.push(parsedFilter);
-                }
-            }
-        }
-        
-        // Handle simple text search tokens
         const searchTerms: string[] = [];
+
         for (let i = 0; i < tokensLength; i++) {
             const token = tokens[i];
-            if (!token.includes(':') && !token.startsWith('-')) {
-                searchTerms.push(token);
+            const parsedFilter = this.parseFilterToken(token);
+            if (parsedFilter) {
+                structuredFilters.push(parsedFilter);
+                continue;
+            }
+
+            // Unknown/incomplete structured syntax remains ordinary quick-search
+            // text instead of silently disappearing from the query.
+            if (!token.startsWith('-')) {
+                searchTerms.push(token.replace(/^(["'])(.*)\1$/, '$2'));
             }
         }
         
         const searchTermsString = searchTerms.join(' ').trim();
         if (searchTermsString) {
-            structuredFilters.push({ id: '_search', value: searchTermsString });
+            structuredFilters.push({ id: '_search', value: searchTerms });
         }
         
         return structuredFilters;
@@ -359,44 +437,27 @@ export class FilterProcessor {
             return value.substring(0, maxLength) + '...'
         }
 
-        return this.config.filterFields.map(field => {
+        return this.config.filterFields.reduce<FilterOption[]>((suggestions, field) => {
             const isNumeric = field.type === 'number'
             const isDate = field.type === 'date'
-            const operator = field.defaultOperator || (isNumeric ? '>' : (isDate ? '=' : '*'))
+            const operator = field.defaultOperator ||
+                (isNumeric ? '>' : isDate ? '=' : field.preferredValues?.length ? '=' : '*')
             
-            // Determine value based on field type
-            let value: any;
+            // A one-click filter is only useful when its value comes from the
+            // actual data or explicit field configuration. Do not invent one.
+            let value: number | string | RegExp | Date
             if (isNumeric) {
-                value = field.defaultNumericValue ?? 0
+                if (field.defaultNumericValue === undefined) return suggestions
+                value = field.defaultNumericValue
             } else if (isDate) {
-                // For date fields, use static dates to prevent hydration mismatches
-                const suggestedValue = field.suggestedValue || 'today'
-                if (suggestedValue.toLowerCase() === 'today') {
-                    // Use fixed date for SSR consistency - in real apps this could be updated after hydration
-                    value = toDate(startOfDay(new Date('2024-01-01')), { timeZone: 'UTC' });
-                } else if (suggestedValue.toLowerCase() === 'yesterday') {
-                    // Use fixed date for SSR consistency
-                    value = toDate(startOfDay(new Date('2023-12-31')), { timeZone: 'UTC' });
-                } else if (suggestedValue.toLowerCase() === 'tomorrow') {
-                    // Use fixed date for SSR consistency
-                    value = toDate(startOfDay(new Date('2024-01-02')), { timeZone: 'UTC' });
-                } else {
-                    // For SSR safety, always use consistent date parsing
-                    // Parse the date string manually to avoid timezone issues
-                    try {
-                        // Ensure we parse ISO date strings consistently
-                        const isoDate = suggestedValue.includes('T') 
-                            ? suggestedValue 
-                            : `${suggestedValue}T00:00:00.000Z`;
-                        value = toDate(startOfDay(new Date(isoDate)), { timeZone: 'UTC' });
-                    } catch {
-                        // Fallback to fixed date for SSR compatibility
-                        value = toDate(startOfDay(new Date('2024-01-01')), { timeZone: 'UTC' });
-                    }
-                }
+                if (!field.suggestedValue) return suggestions
+                const suggestedDate = parseFilterDate(field.suggestedValue)
+                if (!suggestedDate) return suggestions
+                value = suggestedDate
             } else {
-                // For string fields, get the raw value but we'll truncate it for display only
-                value = field.suggestedValue || field.preferredValues?.[0] || 'example'
+                const suggestedValue = field.suggestedValue || field.preferredValues?.[0]
+                if (!suggestedValue) return suggestions
+                value = suggestedValue
             }
                 
             // Create labels based on field type
@@ -404,9 +465,7 @@ export class FilterProcessor {
             if (isNumeric) {
                 label = `${field.label} ${operator} ${value}`
             } else if (isDate) {
-                // For dates, display the original string value in the label
-                const displayValue = field.suggestedValue || 'today'
-                label = `${field.label} ${operator} ${displayValue}`
+                label = `${field.label} ${operator} ${field.suggestedValue}`
             } else {
                 // For string fields, truncate the value for display
                 const displayValue = truncateForDisplay(value.toString())
@@ -421,8 +480,9 @@ export class FilterProcessor {
                 operator,
                 value // Keep the full value for actual filtering
             }
-            return filterOption
-        })
+            suggestions.push(filterOption)
+            return suggestions
+        }, [])
     }
     
     /**
@@ -456,16 +516,18 @@ export class FilterProcessor {
             const fieldFilters = filtersByField[field];
             const fieldDef = this.fieldsById[field];
             
-            // String fields with all wildcard (*) filters use OR logic
+            // Positive categorical/text filters on one field use OR logic,
+            // matching the familiar set-filter model. Negative conditions stay AND.
             if (fieldDef?.type === 'string') {
-                let allWildcard = true;
+                let allPositive = true;
                 for (let j = 0; j < fieldFilters.length; j++) {
-                    if (!(fieldFilters[j].id as string).includes(':*')) {
-                        allWildcard = false;
+                    const { operator } = parseFilterId(fieldFilters[j].id as string)
+                    if (operator !== '*' && operator !== '=') {
+                        allPositive = false;
                         break;
                     }
                 }
-                if (allWildcard) fieldsWithOrLogic.add(field);
+                if (allPositive) fieldsWithOrLogic.add(field);
             }
         }
         

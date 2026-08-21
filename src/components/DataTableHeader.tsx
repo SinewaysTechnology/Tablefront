@@ -108,6 +108,7 @@ export const DataTableHeader = React.memo(<TData,>({
   
   // Get current table state to ensure re-renders when column visibility changes
   const tableState = table.getState()
+  const hasColumnFilters = filters.some((filter) => String(filter?.id) !== '_search')
   
   // Memoize UI components to prevent recreation
   const {
@@ -202,7 +203,7 @@ export const DataTableHeader = React.memo(<TData,>({
             {`${filteredDataLength === 1 ? resultLabel : resultsLabel}: ${filteredDataLength}`}
           </span>
 
-          {filterStore && filters.length > 0 && ClearFiltersBtn && (
+          {filterStore && hasColumnFilters && ClearFiltersBtn && (
             <ClearFiltersBtn
               onClick={onClearFilters}
               aria-label="Clear filters"
@@ -233,6 +234,7 @@ export const DataTableHeader = React.memo(<TData,>({
           {filterStore && layout.showFilterButton && (
             <FilterPopover 
               filterStore={filterStore}
+              columnIds={table.getAllLeafColumns().map((column: { id: string }) => column.id)}
               uiComponents={uiComponents}
               icons={icons}
               styles={tableStyles.filterPopover}
@@ -253,7 +255,7 @@ export const DataTableHeader = React.memo(<TData,>({
     resultsLabel,
     resetToDefaultsLabel,
     filterStore,
-    filters.length,
+    hasColumnFilters,
     onClearFilters,
     onResetTable,
     ClearFiltersBtn,
