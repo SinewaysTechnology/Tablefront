@@ -218,6 +218,7 @@ export const DataTableHeader = React.memo(<TData,>({
         </div>
         
         <div className={tableStyles.header.rightSection}>
+          {headerRightElement}
           {layout.showColumnVisibility && (
             <ColumnVisibilityPopover 
               table={table}
@@ -229,7 +230,6 @@ export const DataTableHeader = React.memo(<TData,>({
               resetLabel={resetToDefaultsLabel}
             />
           )}
-          {headerRightElement}
           {filterStore && layout.showFilterButton && (
             <FilterPopover 
               filterStore={filterStore}
@@ -350,4 +350,4 @@ export const SearchInput = React.memo<{
   )
 })
 
-SearchInput.displayName = 'SearchInput' 
+SearchInput.displayName = 'SearchInput'

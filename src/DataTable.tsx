@@ -1453,11 +1453,20 @@ export function DataTable<TData>({
                 onDrop={handleDrop}
               >
                 {showTableHeaders && effectiveDisplayRows.length > 0 && (
-                  <thead className={cn(tableStyles.table.tableHeader, customStaticRowsSticky && customStaticRows.length > 0 && 'border-b-0')} ref={headerRef}>
+                  <thead
+                    className={cn(
+                      tableStyles.table.tableHeader,
+                      customStaticRowsSticky && customStaticRows.length > 0 && 'border-b-0',
+                    )}
+                    ref={headerRef}
+                    // Keep the header above sticky static rows (z-index 10) and
+                    // transformed body cells during resize/reorder animations.
+                    style={{ zIndex: 20 }}
+                  >
                     {table.getHeaderGroups().map((headerGroup) => (
                       <tr key={headerGroup.id}>
                         {expandable && <th className={tableStyles.table.expandHeader} />}
-                        {headerGroup.headers.map((header) => {
+                        {headerGroup.headers.map((header, headerIndex) => {
                           const canSort = header.column.getCanSort()
                           const sortDirection = header.column.getIsSorted()
                           const meta = (header.column.columnDef.meta as {
@@ -1582,6 +1591,21 @@ export function DataTable<TData>({
                                 !isColumnWidthLocked(columnOverrides, columnId) && (
                                 <div
                                   className={tableStyles.resize.hitslop}
+                                  data-tablefront-resize-handle="true"
+                                  data-tablefront-edge={
+                                    headerIndex === headerGroup.headers.length - 1
+                                      ? 'end'
+                                      : 'inner'
+                                  }
+                                  // The default hit area extends beyond a column edge so
+                                  // boundaries are easy to grab. At the table's final edge
+                                  // that extra width would increase scrollWidth and create a
+                                  // scrollbar even when all columns fit, so contain it there.
+                                  style={
+                                    headerIndex === headerGroup.headers.length - 1
+                                      ? { right: 0 }
+                                      : undefined
+                                  }
                                   onMouseDown={(e) => handleResizeStart(e, columnId)}
                                   onClick={(e) => {
                                     // Prevent all clicks from bubbling up to the sort handler
