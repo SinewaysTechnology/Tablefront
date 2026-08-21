@@ -115,10 +115,10 @@ export const defaultTableStyles: PartialTableStyles = {
   },
   
   dragDrop: {
-    dragGhost: "pointer-events-none z-[9999] opacity-80 bg-background",
-    dropIndicator: "absolute top-0 bottom-0 w-1 bg-primary z-10",
-    dragTarget: "bg-muted/50",
-    dragSource: "opacity-50"
+    dragGhost: "pointer-events-none z-[9999]",
+    dropIndicator: "fixed w-1 bg-primary z-[9999] rounded-full shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_14%,transparent),0_4px_14px_color-mix(in_srgb,currentColor_35%,transparent)]",
+    dragTarget: "bg-primary/10 shadow-[inset_0_-2px_0_color-mix(in_srgb,currentColor_20%,transparent)]",
+    dragSource: "opacity-25 bg-primary/5"
   },
   
   resize: {
@@ -243,10 +243,10 @@ export const modernTableStyles: PartialTableStyles = {
   },
   
   dragDrop: {
-    dragGhost: "pointer-events-none z-[9999] opacity-80 bg-background/50",
-    dropIndicator: "absolute top-0 bottom-0 w-1 bg-primary/50 z-10",
-    dragTarget: "bg-accent/50",
-    dragSource: "opacity-50"
+    dragGhost: "pointer-events-none z-[9999]",
+    dropIndicator: "fixed w-1 bg-primary z-[9999] rounded-full shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_14%,transparent),0_4px_14px_color-mix(in_srgb,currentColor_35%,transparent)]",
+    dragTarget: "bg-primary/10 shadow-[inset_0_-2px_0_color-mix(in_srgb,currentColor_20%,transparent)]",
+    dragSource: "opacity-25 bg-primary/5"
   },
   
   resize: {
@@ -371,10 +371,10 @@ export const compactTableStyles: PartialTableStyles = {
   },
   
   dragDrop: {
-    dragGhost: "pointer-events-none z-[9999] opacity-80 bg-background",
-    dropIndicator: "absolute top-0 bottom-0 w-0.5 bg-primary z-10",
-    dragTarget: "bg-muted/50",
-    dragSource: "opacity-50"
+    dragGhost: "pointer-events-none z-[9999]",
+    dropIndicator: "fixed w-0.5 bg-primary z-[9999] rounded-full shadow-[0_0_0_2px_color-mix(in_srgb,currentColor_12%,transparent),0_3px_10px_color-mix(in_srgb,currentColor_30%,transparent)]",
+    dragTarget: "bg-primary/10 shadow-[inset_0_-1px_0_color-mix(in_srgb,currentColor_20%,transparent)]",
+    dragSource: "opacity-25 bg-primary/5"
   },
   
   resize: {
@@ -395,4 +395,4 @@ export const tableStylePresets = {
 // Helper function to get a preset by name
 export function getTableStylePreset(preset: keyof typeof tableStylePresets) {
   return tableStylePresets[preset]
-} 
+}

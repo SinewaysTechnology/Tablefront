@@ -25,6 +25,7 @@
     --font-weight-semibold: 600;
     --tracking-wide: 0.025em;
     --tracking-wider: 0.05em;
+    --ease-out: cubic-bezier(0, 0, 0.2, 1);
     --animate-spin: spin 1s linear infinite;
     --blur-md: 12px;
     --default-transition-duration: 150ms;
@@ -98,9 +99,6 @@
   [data-tablefront-root] .z-50 {
     z-index: 50;
   }
-  [data-tablefront-root] .z-\[9998\] {
-    z-index: 9998;
-  }
   [data-tablefront-root] .z-\[9999\] {
     z-index: 9999;
   }
@@ -154,6 +152,9 @@
   }
   [data-tablefront-root] .ml-1 {
     margin-left: calc(var(--spacing) * 1);
+  }
+  [data-tablefront-root] .block {
+    display: block;
   }
   [data-tablefront-root] .flex {
     display: flex;
@@ -554,23 +555,11 @@
       border-color: color-mix(in oklab, var(--primary, #0f172a) 50%, transparent);
     }
   }
-  [data-tablefront-root] .bg-accent\/50 {
-    background-color: var(--accent, #f1f5f9);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--accent, #f1f5f9) 50%, transparent);
-    }
-  }
   [data-tablefront-root] .bg-amber-300 {
     background-color: var(--color-amber-300);
   }
   [data-tablefront-root] .bg-background {
     background-color: var(--background, #ffffff);
-  }
-  [data-tablefront-root] .bg-background\/50 {
-    background-color: var(--background, #ffffff);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--background, #ffffff) 50%, transparent);
-    }
   }
   [data-tablefront-root] .bg-background\/90 {
     background-color: var(--background, #ffffff);
@@ -632,6 +621,12 @@
   [data-tablefront-root] .bg-primary {
     background-color: var(--primary, #0f172a);
   }
+  [data-tablefront-root] .bg-primary\/5 {
+    background-color: var(--primary, #0f172a);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--primary, #0f172a) 5%, transparent);
+    }
+  }
   [data-tablefront-root] .bg-primary\/10 {
     background-color: var(--primary, #0f172a);
     @supports (color: color-mix(in lab, red, red)) {
@@ -642,12 +637,6 @@
     background-color: var(--primary, #0f172a);
     @supports (color: color-mix(in lab, red, red)) {
       background-color: color-mix(in oklab, var(--primary, #0f172a) 15%, transparent);
-    }
-  }
-  [data-tablefront-root] .bg-primary\/50 {
-    background-color: var(--primary, #0f172a);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--primary, #0f172a) 50%, transparent);
     }
   }
   [data-tablefront-root] .bg-transparent {
@@ -988,6 +977,9 @@
       color: var(--color-blue-400);
     }
   }
+  [data-tablefront-root] .opacity-25 {
+    opacity: 25%;
+  }
   [data-tablefront-root] .opacity-50 {
     opacity: 50%;
   }
@@ -1004,6 +996,34 @@
   }
   [data-tablefront-root] .shadow-\[0_0_0_1px_rgba\(0\,0\,0\,0\.05\)\,0_3px_6px_rgba\(0\,0\,0\,0\.1\)\,0_5px_15px_rgba\(0\,0\,0\,0\.1\)\] {
     --tw-shadow: 0 0 0 1px var(--tw-shadow-color, rgba(0,0,0,0.05)), 0 3px 6px var(--tw-shadow-color, rgba(0,0,0,0.1)), 0 5px 15px var(--tw-shadow-color, rgba(0,0,0,0.1));
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  [data-tablefront-root] .shadow-\[0_0_0_2px_color-mix\(in_srgb\,currentColor_12\%\,transparent\)\,0_3px_10px_color-mix\(in_srgb\,currentColor_30\%\,transparent\)\] {
+    --tw-shadow: 0 0 0 2px var(--tw-shadow-color, currentColor), 0 3px 10px var(--tw-shadow-color, currentColor);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-shadow: 0 0 0 2px var(--tw-shadow-color, color-mix(in srgb,currentColor 12%,transparent)), 0 3px 10px var(--tw-shadow-color, color-mix(in srgb,currentColor 30%,transparent));
+    }
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  [data-tablefront-root] .shadow-\[0_0_0_3px_color-mix\(in_srgb\,currentColor_14\%\,transparent\)\,0_4px_14px_color-mix\(in_srgb\,currentColor_35\%\,transparent\)\] {
+    --tw-shadow: 0 0 0 3px var(--tw-shadow-color, currentColor), 0 4px 14px var(--tw-shadow-color, currentColor);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-shadow: 0 0 0 3px var(--tw-shadow-color, color-mix(in srgb,currentColor 14%,transparent)), 0 4px 14px var(--tw-shadow-color, color-mix(in srgb,currentColor 35%,transparent));
+    }
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  [data-tablefront-root] .shadow-\[inset_0_-1px_0_color-mix\(in_srgb\,currentColor_20\%\,transparent\)\] {
+    --tw-shadow: inset 0 -1px 0 var(--tw-shadow-color, currentColor);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-shadow: inset 0 -1px 0 var(--tw-shadow-color, color-mix(in srgb,currentColor 20%,transparent));
+    }
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  [data-tablefront-root] .shadow-\[inset_0_-2px_0_color-mix\(in_srgb\,currentColor_20\%\,transparent\)\] {
+    --tw-shadow: inset 0 -2px 0 var(--tw-shadow-color, currentColor);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-shadow: inset 0 -2px 0 var(--tw-shadow-color, color-mix(in srgb,currentColor 20%,transparent));
+    }
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
   }
   [data-tablefront-root] .shadow-inner {
@@ -1038,8 +1058,18 @@
     -webkit-backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);
     backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);
   }
+  [data-tablefront-root] .transition {
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events;
+    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--default-transition-duration));
+  }
   [data-tablefront-root] .transition-\[background-color\,width\] {
     transition-property: background-color,width;
+    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--default-transition-duration));
+  }
+  [data-tablefront-root] .transition-\[transform\,opacity\,background-color\,box-shadow\] {
+    transition-property: transform,opacity,background-color,box-shadow;
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
@@ -1064,6 +1094,10 @@
   [data-tablefront-root] .duration-300 {
     --tw-duration: 300ms;
     transition-duration: 300ms;
+  }
+  [data-tablefront-root] .ease-out {
+    --tw-ease: var(--ease-out);
+    transition-timing-function: var(--ease-out);
   }
   [data-tablefront-root] .animate-in {
     animation-name: enter;
@@ -1090,6 +1124,9 @@
   }
   [data-tablefront-root] .duration-300 {
     animation-duration: 300ms;
+  }
+  [data-tablefront-root] .ease-out {
+    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
   }
   [data-tablefront-root] .fade-in-0 {
     --tw-enter-opacity: 0;
@@ -1931,6 +1968,10 @@
   syntax: "*";
   inherits: false;
 }
+@property --tw-ease {
+  syntax: "*";
+  inherits: false;
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -2002,6 +2043,7 @@
       --tw-backdrop-saturate: initial;
       --tw-backdrop-sepia: initial;
       --tw-duration: initial;
+      --tw-ease: initial;
     }
   }
 }

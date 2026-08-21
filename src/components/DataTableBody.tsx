@@ -208,6 +208,7 @@ export function DataTableBody<TData>({
           {tableRow.getVisibleCells().map((cell: any) => (
             <td
               key={cell.id}
+              data-column-id={cell.column.id}
               className={cn(
                 tableStyles.table.tableCell,
                 enableColumnResize && 'overflow-hidden',

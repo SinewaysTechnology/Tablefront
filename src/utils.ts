@@ -185,18 +185,123 @@ export const getColumnIdFromElement = (element: HTMLElement): string | null => {
   return element.getAttribute('data-column-id')
 }
 
-export const setDragImage = (event: DragEvent, element: HTMLElement) => {
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setDragImage(element, 0, 0)
+const prefersReducedMotion = (): boolean =>
+  typeof window !== 'undefined' &&
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+
+/** Create a styled DOM ghost while hiding the browser's native drag bitmap. */
+export const setDragImage = (
+  event: DragEvent,
+  element: HTMLElement,
+  className: string = '',
+): HTMLElement | null => {
+  if (!event.dataTransfer || typeof document === 'undefined') return null
+
+  const rect = element.getBoundingClientRect()
+
+  const resolveBackground = (source: HTMLElement): string => {
+    let current: HTMLElement | null = source
+    while (current) {
+      const background = getComputedStyle(current).backgroundColor
+      if (background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent') return background
+      current = current.parentElement
+    }
+    return 'Canvas'
   }
+
+  const cloneCell = (source: HTMLElement): HTMLElement => {
+    const clone = source.cloneNode(true) as HTMLElement
+    const computed = getComputedStyle(source)
+    clone.removeAttribute('id')
+    clone.removeAttribute('draggable')
+    Object.assign(clone.style, {
+      width: `${rect.width}px`,
+      minWidth: `${rect.width}px`,
+      maxWidth: `${rect.width}px`,
+      height: `${source.getBoundingClientRect().height}px`,
+      boxSizing: 'border-box',
+      display: 'flex',
+      alignItems: 'center',
+      overflow: 'hidden',
+      margin: '0',
+      padding: computed.padding,
+      color: computed.color,
+      font: computed.font,
+      textAlign: computed.textAlign,
+      whiteSpace: computed.whiteSpace,
+      backgroundColor: resolveBackground(source),
+      borderTop: computed.borderTop,
+      borderRight: computed.borderRight,
+      borderBottom: computed.borderBottom,
+      borderLeft: computed.borderLeft,
+      borderRadius: '0',
+    })
+    return clone
+  }
+
+  const ghost = document.createElement('div')
+  ghost.setAttribute('data-tablefront-root', '')
+  ghost.setAttribute('aria-hidden', 'true')
+  ghost.className = className
+
+  const headerClone = cloneCell(element)
+  ghost.appendChild(headerClone)
+
+  Object.assign(ghost.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    zIndex: '2147483647',
+    width: `${rect.width}px`,
+    boxSizing: 'border-box',
+    display: 'block',
+    overflow: 'hidden',
+    pointerEvents: 'none',
+    margin: '0',
+    padding: '0',
+    border: '0',
+    borderRadius: '0',
+    boxShadow: '0 18px 45px -18px rgba(0,0,0,.42), 0 8px 18px -12px rgba(0,0,0,.28)',
+    opacity: '0.98',
+    transform: `translate3d(${rect.left}px, ${rect.top}px, 0)`,
+    willChange: 'transform, opacity',
+    transition: prefersReducedMotion()
+      ? 'none'
+      : 'transform 70ms linear, opacity 120ms ease',
+  })
+
+  document.body.appendChild(ghost)
+
+  const transparentImage = document.createElement('canvas')
+  transparentImage.width = 1
+  transparentImage.height = 1
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setDragImage(transparentImage, 0, 0)
+
+  return ghost
+}
+
+export const moveDragImage = (ghost: HTMLElement | null, left: number, top: number) => {
+  if (!ghost) return
+  ghost.style.transform = `translate3d(${left}px, ${top}px, 0)`
+}
+
+export const removeDragImage = (ghost: HTMLElement | null) => {
+  if (!ghost?.parentNode) return
+  if (prefersReducedMotion()) {
+    ghost.remove()
+    return
+  }
+
+  ghost.style.opacity = '0'
+  window.setTimeout(() => ghost.remove(), 150)
 }
 
 // Enhanced drag utilities for smooth animations
 export const getDropTargetIndex = (
   x: number,
   headerCells: HTMLElement[],
-  draggedIndex: number
+  draggedIndex: number,
 ): { index: number; columnId: string | null } => {
   if (headerCells.length === 0) return { index: -1, columnId: null }
   
@@ -233,22 +338,48 @@ export const addDropIndicator = (
 ): HTMLElement => {
   const indicator = document.createElement('div')
   indicator.className = dropIndicatorClass
-  
-  if (position === 'before') {
-    indicator.style.left = '0'
-  } else {
-    indicator.style.right = '0'
-  }
-  
-  targetElement.style.position = 'relative'
-  targetElement.appendChild(indicator)
-  
+  Object.assign(indicator.style, {
+    position: 'fixed',
+    left: '0',
+    right: 'auto',
+    bottom: 'auto',
+    pointerEvents: 'none',
+    opacity: '0',
+    transformOrigin: 'center',
+    willChange: 'transform, opacity',
+    transition: prefersReducedMotion()
+      ? 'none'
+      : 'transform 180ms cubic-bezier(.2,.8,.2,1), opacity 120ms ease',
+  })
+  document.body.appendChild(indicator)
+  moveDropIndicator(indicator, targetElement, position)
+  requestAnimationFrame(() => {
+    indicator.style.opacity = '1'
+  })
   return indicator
+}
+
+export const moveDropIndicator = (
+  indicator: HTMLElement,
+  targetElement: HTMLElement,
+  position: 'before' | 'after',
+) => {
+  const rect = targetElement.getBoundingClientRect()
+  const x = position === 'before' ? rect.left : rect.right
+  indicator.style.top = `${rect.top}px`
+  indicator.style.height = `${rect.height}px`
+  indicator.style.transform = `translate3d(${x}px, 0, 0) translateX(-50%) scaleY(1)`
 }
 
 export const removeDropIndicator = (indicator: HTMLElement | null) => {
   if (indicator && indicator.parentNode) {
-    indicator.parentNode.removeChild(indicator)
+    if (prefersReducedMotion()) {
+      indicator.remove()
+      return
+    }
+    indicator.style.opacity = '0'
+    indicator.style.transform += ' scaleY(0.45)'
+    window.setTimeout(() => indicator.remove(), 140)
   }
 }
 

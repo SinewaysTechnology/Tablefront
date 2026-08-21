@@ -1,14 +1,16 @@
 "use client"
 
-import React, { useEffect, useRef, useCallback, useState, useMemo, KeyboardEvent, startTransition } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useCallback, useState, useMemo, KeyboardEvent, startTransition } from "react";
 import { useWindowResize } from './hooks/useWindowResize'
 import { DEFAULT_RESIZE_RESET_DEBOUNCE } from './constants/resize'
 import { 
   cn, 
   createDragState, 
   setDragImage, 
-  getDropTargetIndex,
+  moveDragImage,
+  removeDragImage,
   addDropIndicator,
+  moveDropIndicator,
   removeDropIndicator,
   createResizeState,
   applyResizeCursor,
@@ -273,8 +275,95 @@ export function DataTable<TData>({
   const headerRef = useRef<HTMLTableSectionElement>(null);
   const dropIndicatorRef = useRef<HTMLElement | null>(null);
   const headerCellsRef = useRef<HTMLElement[]>([]);
+  const dragGhostRef = useRef<HTMLElement | null>(null)
+  const dragGhostOffsetRef = useRef({ x: 0, y: 0 })
+  const dragMoveFrameRef = useRef<number | null>(null)
+  const pendingDragPointRef = useRef({ x: 0, y: 0 })
+  const dropSettleRectsRef = useRef<Map<string, number> | null>(null)
+  const dragInitialOrderRef = useRef<string[] | null>(null)
+  const dragDropCommittedRef = useRef(false)
+  const activeDraggedColumnIdRef = useRef<string | null>(null)
+  const removeDocumentDragAcceptanceRef = useRef<(() => void) | null>(null)
+  const optimisticSwapPendingRef = useRef(false)
+  const optimisticUnlockTimerRef = useRef<number | null>(null)
+  const dragDirectionRef = useRef<'left' | 'right' | null>(null)
+  const dragDirectionAnchorXRef = useRef(0)
   const headerHeightRef = useRef(0);
   const stickyStaticRowsHeightRef = useRef(0);
+
+  // FLIP the reordered headers from their pre-drop positions into the new order.
+  useLayoutEffect(() => {
+    const previousRects = dropSettleRectsRef.current
+    dropSettleRectsRef.current = null
+    if (!headerRef.current) return
+
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const deltas = new Map<string, number>()
+    const cells = Array.from(
+      headerRef.current.querySelectorAll<HTMLElement>('th[data-column-id]'),
+    )
+
+    if (previousRects && !reduceMotion) {
+      cells.forEach((cell) => {
+        const columnId = cell.getAttribute('data-column-id')
+        const previousLeft = columnId ? previousRects.get(columnId) : undefined
+        if (previousLeft === undefined) return
+        const deltaX = previousLeft - cell.getBoundingClientRect().left
+        if (Math.abs(deltaX) < 0.5) return
+        if (columnId) deltas.set(columnId, deltaX)
+        cell.animate(
+          [
+            { transform: `translate3d(${deltaX}px, 0, 0)` },
+            { transform: 'translate3d(0, 0, 0)' },
+          ],
+          { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' },
+        )
+      })
+    }
+
+    // Carry the same settle motion into rendered rows. Cap the work so a large
+    // non-virtualized table never creates hundreds of compositor animations.
+    const tableElement = headerRef.current.closest('table')
+    const bodyCells = tableElement?.querySelectorAll<HTMLElement>('tbody td[data-column-id]')
+    if (!reduceMotion && bodyCells && bodyCells.length <= 600) {
+      bodyCells.forEach((cell) => {
+        const columnId = cell.getAttribute('data-column-id')
+        const deltaX = columnId ? deltas.get(columnId) : undefined
+        if (deltaX === undefined) return
+        cell.animate(
+          [
+            { transform: `translate3d(${deltaX}px, 0, 0)`, opacity: 0.88 },
+            { transform: 'translate3d(0, 0, 0)', opacity: 1 },
+          ],
+          { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' },
+        )
+      })
+    }
+
+    headerCellsRef.current = cells
+    if (optimisticSwapPendingRef.current) {
+      if (optimisticUnlockTimerRef.current != null) {
+        window.clearTimeout(optimisticUnlockTimerRef.current)
+      }
+      if (reduceMotion) {
+        optimisticSwapPendingRef.current = false
+      } else {
+        optimisticUnlockTimerRef.current = window.setTimeout(() => {
+          optimisticSwapPendingRef.current = false
+          optimisticUnlockTimerRef.current = null
+        }, 90)
+      }
+    }
+  }, [columnOrder])
+
+  useEffect(() => () => {
+    if (dragMoveFrameRef.current != null) cancelAnimationFrame(dragMoveFrameRef.current)
+    if (optimisticUnlockTimerRef.current != null) window.clearTimeout(optimisticUnlockTimerRef.current)
+    removeDocumentDragAcceptanceRef.current?.()
+    activeDraggedColumnIdRef.current = null
+    removeDragImage(dragGhostRef.current)
+    removeDropIndicator(dropIndicatorRef.current)
+  }, [])
 
   // Measure header and sticky static rows heights and cache them
   useEffect(() => {
@@ -705,20 +794,6 @@ export function DataTable<TData>({
   // ============================================================================
   
   /**
-   * Reorders columns in the array by moving an item from draggedIndex to dropIndex
-   */
-  const reorderColumns = useCallback((currentOrder: string[], draggedIndex: number, dropIndex: number): string[] => {
-    const newOrder = [...currentOrder];
-    newOrder.splice(draggedIndex, 1);
-    
-    // Adjust drop index if we're moving to the right
-    const adjustedDropIndex = draggedIndex < dropIndex ? dropIndex - 1 : dropIndex;
-    newOrder.splice(adjustedDropIndex, 0, currentOrder[draggedIndex]);
-    
-    return newOrder;
-  }, []);
-
-  /**
    * Cleans up the drop indicator element and resets the reference
    */
   const cleanupDropIndicator = useCallback(() => {
@@ -727,6 +802,39 @@ export function DataTable<TData>({
       dropIndicatorRef.current = null;
     }
   }, []);
+
+  const cleanupDragVisuals = useCallback(() => {
+    if (dragMoveFrameRef.current != null) {
+      cancelAnimationFrame(dragMoveFrameRef.current)
+      dragMoveFrameRef.current = null
+    }
+    if (optimisticUnlockTimerRef.current != null) {
+      window.clearTimeout(optimisticUnlockTimerRef.current)
+      optimisticUnlockTimerRef.current = null
+    }
+    cleanupDropIndicator()
+    removeDragImage(dragGhostRef.current)
+    dragGhostRef.current = null
+    removeDocumentDragAcceptanceRef.current?.()
+    removeDocumentDragAcceptanceRef.current = null
+    activeDraggedColumnIdRef.current = null
+    dragDirectionRef.current = null
+    dragDirectionAnchorXRef.current = 0
+  }, [cleanupDropIndicator])
+
+  const queueDragGhostMove = useCallback((x: number, y: number) => {
+    // Some browsers emit a final native drag event at 0,0.
+    if (x === 0 && y === 0) return
+    pendingDragPointRef.current = { x, y }
+    if (dragMoveFrameRef.current != null) return
+
+    dragMoveFrameRef.current = requestAnimationFrame(() => {
+      dragMoveFrameRef.current = null
+      const point = pendingDragPointRef.current
+      const offset = dragGhostOffsetRef.current
+      moveDragImage(dragGhostRef.current, point.x - offset.x, point.y - offset.y)
+    })
+  }, [])
 
   // ============================================================================
   // DRAG AND DROP EVENT HANDLERS
@@ -737,15 +845,56 @@ export function DataTable<TData>({
    */
   const handleDragStart = useCallback((e: React.DragEvent<HTMLTableCellElement>, columnId: string) => {
     if (!enableColumnDrag) return;
+
+    // Native drag events can reach dragenter/dragover before React has rendered
+    // the dragging state. Keep the active session in a ref so every event is
+    // accepted synchronously and Chromium never falls back to a no-drop cursor.
+    activeDraggedColumnIdRef.current = columnId
+
+    const acceptDrag = (event: globalThis.DragEvent) => {
+      if (!activeDraggedColumnIdRef.current) return
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+    }
+    const acceptDrop = (event: globalThis.DragEvent) => {
+      if (!activeDraggedColumnIdRef.current) return
+      acceptDrag(event)
+      dragDropCommittedRef.current = true
+    }
+
+    removeDocumentDragAcceptanceRef.current?.()
+    document.addEventListener('dragenter', acceptDrag, true)
+    document.addEventListener('dragover', acceptDrag, true)
+    document.addEventListener('drop', acceptDrop, true)
+    removeDocumentDragAcceptanceRef.current = () => {
+      document.removeEventListener('dragenter', acceptDrag, true)
+      document.removeEventListener('dragover', acceptDrag, true)
+      document.removeEventListener('drop', acceptDrop, true)
+    }
     
     const target = e.currentTarget;
-    setDragImage(e.nativeEvent, target);
+    const targetRect = target.getBoundingClientRect()
+    dragGhostOffsetRef.current = {
+      x: Math.max(0, Math.min(targetRect.width, e.clientX - targetRect.left)),
+      y: Math.max(0, Math.min(targetRect.height, e.clientY - targetRect.top)),
+    }
+    dragGhostRef.current = setDragImage(
+      e.nativeEvent,
+      target,
+      tableStyles.dragDrop.dragGhost,
+    )
+    e.dataTransfer.setData('text/plain', columnId)
     
     if (headerRef.current) {
       headerCellsRef.current = Array.from(
         headerRef.current.querySelectorAll('th[data-column-id]')
       ) as HTMLElement[];
     }
+    dragInitialOrderRef.current = [...table.getState().columnOrder]
+    dragDropCommittedRef.current = false
+    optimisticSwapPendingRef.current = false
+    dragDirectionRef.current = null
+    dragDirectionAnchorXRef.current = e.clientX
     
     setDragState(prev => ({
       ...prev,
@@ -756,106 +905,142 @@ export function DataTable<TData>({
       currentX: e.clientX,
       currentY: e.clientY,
     }));
-  }, [enableColumnDrag]);
+  }, [enableColumnDrag, tableStyles.dragDrop.dragGhost, table]);
 
   /**
    * Handles drag over events
    */
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    if (!enableColumnDrag || !dragState.isDragging || !dragState.draggedColumnId) return;
+    const draggedColumnId = activeDraggedColumnIdRef.current
+    if (!enableColumnDrag || !draggedColumnId) return;
     
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    
-    const currentX = e.clientX;
-    const currentY = e.clientY;
-    
-    const draggedIndexInOrder = (() => {
-      try {
-        const order = table.getState().columnOrder
-        return order.indexOf(dragState.draggedColumnId as string)
-      } catch {
-        return -1
+
+    // Move the custom ghost at most once per frame. No React render is needed
+    // for pointer tracking.
+    queueDragGhostMove(e.clientX, e.clientY)
+
+    // Keep the user's actual pointer direction separate from the dragged
+    // header's layout position. Unequal column widths can move the header past
+    // a stationary pointer after a swap; that must not be interpreted as an
+    // immediate move in the opposite direction.
+    const reversalThreshold = 3
+    let dragDirection = dragDirectionRef.current
+    const directionAnchorX = dragDirectionAnchorXRef.current
+
+    if (dragDirection === null) {
+      const deltaX = e.clientX - directionAnchorX
+      if (Math.abs(deltaX) >= 1) {
+        dragDirection = deltaX > 0 ? 'right' : 'left'
+        dragDirectionRef.current = dragDirection
+        dragDirectionAnchorXRef.current = e.clientX
       }
-    })()
-    const { index: dropIndex, columnId: dropColumnId } = getDropTargetIndex(
-      currentX,
-      headerCellsRef.current,
-      draggedIndexInOrder
-    );
-    
-    const currentTargetIndex = dragState.dropTargetIndex;
-    if (dropIndex !== currentTargetIndex) {
-      if (dropIndicatorRef.current) {
-        removeDropIndicator(dropIndicatorRef.current);
-        dropIndicatorRef.current = null;
+    } else if (dragDirection === 'right') {
+      if (e.clientX >= directionAnchorX) {
+        dragDirectionAnchorXRef.current = e.clientX
+      } else if (directionAnchorX - e.clientX >= reversalThreshold) {
+        dragDirection = 'left'
+        dragDirectionRef.current = dragDirection
+        dragDirectionAnchorXRef.current = e.clientX
       }
-      
-      const len = headerCellsRef.current.length
-      if (dropIndex >= 0 && dropIndex < len) {
-        const targetCell = headerCellsRef.current[dropIndex]
-        const indicator = addDropIndicator(targetCell, 'before', tableStyles.dragDrop.dropIndicator)
-        dropIndicatorRef.current = indicator
-      } else if (dropIndex === len && len > 0) {
-        // Show indicator at the far right when dropping at the end
-        const targetCell = headerCellsRef.current[len - 1]
-        const indicator = addDropIndicator(targetCell, 'after', tableStyles.dragDrop.dropIndicator)
-        dropIndicatorRef.current = indicator
-      }
+    } else if (e.clientX <= directionAnchorX) {
+      dragDirectionAnchorXRef.current = e.clientX
+    } else if (e.clientX - directionAnchorX >= reversalThreshold) {
+      dragDirection = 'right'
+      dragDirectionRef.current = dragDirection
+      dragDirectionAnchorXRef.current = e.clientX
     }
-    
+
+    if (optimisticSwapPendingRef.current || dragDirection === null) return
+
+    const cells = headerCellsRef.current
+    const draggedIndex = cells.findIndex(
+      (cell) => cell.getAttribute('data-column-id') === draggedColumnId,
+    )
+    const draggedCell = cells[draggedIndex]
+    if (!draggedCell) return
+
+    const draggedRect = draggedCell.getBoundingClientRect()
+    const movingLeft = dragDirection === 'left' && e.clientX < draggedRect.left && draggedIndex > 0
+    const movingRight = dragDirection === 'right' && e.clientX > draggedRect.right && draggedIndex < cells.length - 1
+    if (!movingLeft && !movingRight) return
+
+    // Crossing the dragged column's own edge swaps immediately with the next
+    // visible neighbor. This is intentionally earlier than midpoint targeting.
+    const adjacentIndex = movingLeft ? draggedIndex - 1 : draggedIndex + 1
+    const adjacentCell = cells[adjacentIndex]
+    const adjacentColumnId = adjacentCell?.getAttribute('data-column-id')
+    if (!adjacentCell || !adjacentColumnId) return
+
+    const currentOrder = table.getState().columnOrder
+    const fromIndex = currentOrder.indexOf(draggedColumnId)
+    const adjacentOrderIndex = currentOrder.indexOf(adjacentColumnId)
+    if (fromIndex < 0 || adjacentOrderIndex < 0) return
+
+    const nextOrder = [...currentOrder]
+    const adjacentColumn = nextOrder[adjacentOrderIndex]
+    nextOrder[adjacentOrderIndex] = nextOrder[fromIndex]
+    nextOrder[fromIndex] = adjacentColumn
+
+    dropSettleRectsRef.current = new Map(
+      cells.map((cell) => [
+        cell.getAttribute('data-column-id') || '',
+        cell.getBoundingClientRect().left,
+      ]),
+    )
+    optimisticSwapPendingRef.current = true
+
+    const indicatorPosition: 'before' | 'after' = movingLeft ? 'before' : 'after'
+    if (dropIndicatorRef.current) {
+      moveDropIndicator(dropIndicatorRef.current, adjacentCell, indicatorPosition)
+    } else {
+      dropIndicatorRef.current = addDropIndicator(
+        adjacentCell,
+        indicatorPosition,
+        tableStyles.dragDrop.dropIndicator,
+      )
+    }
+
     setDragState(prev => ({
       ...prev,
-      currentX,
-      currentY,
-      dropTargetIndex: dropIndex,
-      dropTargetColumnId: dropColumnId,
-    }));
-  }, [enableColumnDrag, dragState.isDragging, dragState.draggedColumnId, dragState.dropTargetIndex, tableStyles.dragDrop.dropIndicator, table]);
+      dropTargetIndex: adjacentIndex,
+      dropTargetColumnId: adjacentColumnId,
+    }))
+    setColumnOrder(nextOrder)
+  }, [enableColumnDrag, tableStyles.dragDrop.dropIndicator, queueDragGhostMove, table, setColumnOrder]);
 
   /**
    * Handles drop events
    */
   const handleDrop = useCallback((e: React.DragEvent) => {
-    if (!enableColumnDrag || !dragState.isDragging || !dragState.draggedColumnId) return;
+    if (!enableColumnDrag || !activeDraggedColumnIdRef.current) return;
     
     e.preventDefault();
-    
-    const draggedColumnId = dragState.draggedColumnId;
-    const dropIndex = dragState.dropTargetIndex;
-    
-    if (dropIndex === null || dropIndex === -1) return;
-    
-    const currentOrder = table.getState().columnOrder;
-    const draggedIndex = currentOrder.indexOf(draggedColumnId);
-    
-    if (draggedIndex === -1) return;
-
-    // Map the visible drop index to the actual index in currentOrder,
-    // accounting for hidden columns that are not present in headerCellsRef
-    let targetIndexInOrder = dropIndex
-    const visibleCount = headerCellsRef.current.length
-    if (dropIndex === visibleCount) {
-      // Dropping at the far right -> insert at end of currentOrder
-      targetIndexInOrder = currentOrder.length
-    } else if (dragState.dropTargetColumnId) {
-      const idx = currentOrder.indexOf(dragState.dropTargetColumnId)
-      if (idx !== -1) targetIndexInOrder = idx
-    }
-
-    const newOrder = reorderColumns(currentOrder, draggedIndex, targetIndexInOrder);
-    setColumnOrder(newOrder);
-    cleanupDropIndicator();
+    dragDropCommittedRef.current = true
+    cleanupDragVisuals()
     setDragState(createDragState());
-  }, [enableColumnDrag, dragState.isDragging, dragState.draggedColumnId, dragState.dropTargetIndex, table, setColumnOrder, reorderColumns, cleanupDropIndicator]);
+  }, [enableColumnDrag, cleanupDragVisuals]);
 
   /**
    * Handles drag end events
    */
   const handleDragEnd = useCallback(() => {
-    cleanupDropIndicator();
-    setDragState(createDragState());
-  }, [cleanupDropIndicator]);
+    if (!dragDropCommittedRef.current && dragInitialOrderRef.current) {
+      dropSettleRectsRef.current = new Map(
+        headerCellsRef.current.map((cell) => [
+          cell.getAttribute('data-column-id') || '',
+          cell.getBoundingClientRect().left,
+        ]),
+      )
+      setColumnOrder(dragInitialOrderRef.current)
+    }
+    cleanupDragVisuals()
+    dragInitialOrderRef.current = null
+    dragDropCommittedRef.current = false
+    optimisticSwapPendingRef.current = false
+    setDragState(createDragState())
+  }, [cleanupDragVisuals, setColumnOrder]);
 
   // ============================================================================
   // COLUMN RESIZE EVENT HANDLERS
@@ -1103,20 +1288,6 @@ export function DataTable<TData>({
     }
   }, [resizeState.isResizing, handleResizeMove, handleResizeEnd]);
 
-  // Memoize global drop zone to prevent unnecessary re-renders
-  const globalDropZone = useMemo(() => {
-    if (!enableColumnDrag || !dragState.isDragging) return null;
-    
-    return (
-      <div
-        className="fixed inset-0 z-[9998] pointer-events-none"
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-        onDragEnd={handleDragEnd}
-      />
-    );
-  }, [enableColumnDrag, dragState.isDragging, handleDragOver, handleDrop, handleDragEnd]);
-
   // Memoize global resize overlay to prevent unnecessary re-renders
   const globalResizeOverlay = useMemo(() => {
     if (!enableColumnResize || !resizeState.isResizing) return null;
@@ -1133,7 +1304,6 @@ export function DataTable<TData>({
 
   return (
     <div data-tablefront-root className="flex h-full min-h-0 w-full flex-1 flex-col">
-      {globalDropZone}
       {globalResizeOverlay}
       <div 
         className={cn(tableStyles.container, 'relative')}
@@ -1330,9 +1500,11 @@ export function DataTable<TData>({
                             }
                           }
                           
-                          // Optimize drag state calculations
                           const isDragging = dragState.isDragging && dragState.draggedColumnId === columnId;
-                          const isDragTarget = dragState.isDragging && !isDragging;
+                          const isDragTarget =
+                            dragState.isDragging &&
+                            !isDragging &&
+                            dragState.dropTargetColumnId === columnId;
                           
                           return (
                             <th 
@@ -1347,10 +1519,12 @@ export function DataTable<TData>({
                               }}
                               draggable={enableColumnDrag}
                               onDragStart={(e) => handleDragStart(e, columnId)}
+                              onDrag={(e) => queueDragGhostMove(e.clientX, e.clientY)}
                               onDragEnd={handleDragEnd}
                               className={cn(
                                 tableStyles.table.tableHeaderCell,
                                 canSort && "cursor-pointer select-none",
+                                enableColumnDrag && "transition-[transform,opacity,background-color,box-shadow] duration-200 ease-out",
                                 isDragging && tableStyles.dragDrop.dragSource,
                                 isDragTarget && tableStyles.dragDrop.dragTarget,
                                 enableColumnResize && "relative",
