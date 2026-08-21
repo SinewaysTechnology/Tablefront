@@ -347,14 +347,21 @@ export const applyColumnWidthToDomImmediate = (
 export type ResizeLayoutLock = {
   table: HTMLElement
   headerCells: HTMLElement[]
-  /** Live widths (unlocked columns may grow to fill the viewport). */
+  /** Immutable rendered widths captured before any drag-time styles are applied. */
+  initialWidths: number[]
+  /** Last widths written to the header cells. */
   widths: number[]
-  /** Immutable widths for `lockWidth` columns (and expand gutter). */
-  pinnedWidths: number[]
+  /** Reused per-frame calculation buffer to avoid allocations while dragging. */
+  nextWidths: number[]
   locked: boolean[]
   activeIndex: number
+  initialTotalWidth: number
+  initialTableWidth: number
   totalWidth: number
-  hasPinnedColumns: boolean
+  originalTableWidth: string
+  originalTableMinWidth: string
+  /** Whether drag-time table/cell styles have actually been written. */
+  isApplied: boolean
 }
 
 export type LockTableResizeLayoutOptions = {
@@ -391,95 +398,76 @@ export const cssLengthToPx = (value: unknown): number => {
   return 0
 }
 
-const getTableScrollContainer = (table: HTMLElement): HTMLElement | null =>
-  (table.closest('[data-radix-scroll-area-viewport]') as HTMLElement | null) ||
-  table.parentElement
+const measureCellWidth = (cell: HTMLElement): number =>
+  cell.getBoundingClientRect().width
 
-/** Set table width so columns keep pixel sizes instead of being compressed into the viewport. */
-export const setTableContentWidth = (
-  table: HTMLElement,
-  contentWidth: number,
-  options?: { fillContainer?: boolean },
-) => {
-  const rounded = Math.max(0, Math.ceil(contentWidth))
-  const fillContainer = options?.fillContainer !== false
-  if (!fillContainer) {
-    table.style.width = `${rounded}px`
-    table.style.minWidth = `${rounded}px`
-    return
-  }
-
-  const scrollParent = getTableScrollContainer(table)
-  const containerWidth = scrollParent?.clientWidth ?? 0
-  const width = Math.max(rounded, containerWidth)
-  table.style.width = `${width}px`
-  table.style.minWidth = `${rounded}px`
-}
-
-/** Only trust inline `Npx` — rem/em/% would parse incorrectly via parseFloat. */
-const readInlinePxWidth = (cell: HTMLElement): number => {
-  for (const value of [cell.style.width, cell.style.maxWidth, cell.style.minWidth]) {
-    if (typeof value === 'string' && value.trim().endsWith('px')) {
-      const px = parseCssPx(value)
-      if (px > 0) return px
-    }
-  }
-  return 0
-}
-
-const measureCellWidth = (cell: HTMLElement, isPinned: boolean): number => {
-  if (isPinned) {
-    const fromStyle = readInlinePxWidth(cell)
-    if (fromStyle > 0) return fromStyle
-  }
-  return cell.getBoundingClientRect().width
+/**
+ * Keep the drag-time table width anchored to its rendered starting width.
+ * Only actual content growth/shrink changes the outer table width.
+ */
+const setResizeTableWidth = (lock: ResizeLayoutLock, contentWidth: number) => {
+  const contentDelta = contentWidth - lock.initialTotalWidth
+  const tableWidth = Math.max(0, lock.initialTableWidth + contentDelta)
+  const px = `${tableWidth}px`
+  if (lock.table.style.width !== px) lock.table.style.width = px
+  if (lock.table.style.minWidth !== px) lock.table.style.minWidth = px
 }
 
 /**
  * Keep pinned columns at their fixed widths; optionally pour leftover viewport
- * space into unlocked columns (never into pinned ones).
+ * space into unlocked columns to the right of the active column. Columns on the
+ * left stay anchored while a narrower active column is absorbed by the table.
  */
-const syncResizeLayoutWidths = (lock: ResizeLayoutLock) => {
-  // Re-pin locked columns every frame so table fill cannot stretch them
+const syncResizeLayoutWidths = (
+  lock: ResizeLayoutLock,
+  activeWidth: number,
+) => {
+  // Derive every frame from the immutable starting geometry. This makes the
+  // first frame a no-op and prevents cumulative drift when reversing a drag.
+  const nextWidths = lock.nextWidths
+  for (let index = 0; index < lock.initialWidths.length; index++) {
+    nextWidths[index] = lock.initialWidths[index] ?? 0
+  }
+  const initialActiveWidth = lock.initialWidths[lock.activeIndex] ?? activeWidth
+  nextWidths[lock.activeIndex] = activeWidth
+
+  let total = lock.initialTotalWidth + (activeWidth - initialActiveWidth)
+
+  if (activeWidth < initialActiveWidth) {
+    let flexibleCount = 0
+    for (let index = lock.activeIndex + 1; index < nextWidths.length; index++) {
+      if (!lock.locked[index]) flexibleCount += 1
+    }
+
+    if (flexibleCount > 0) {
+      const slack = lock.initialTotalWidth - total
+      const each = slack / flexibleCount
+      for (let index = lock.activeIndex + 1; index < nextWidths.length; index++) {
+        if (!lock.locked[index]) {
+          nextWidths[index] = (nextWidths[index] ?? 0) + each
+        }
+      }
+      total = lock.initialTotalWidth
+    }
+    // If no right-side column is flexible, shrink the table and leave free space.
+  }
+
   for (let index = 0; index < lock.headerCells.length; index++) {
-    if (lock.locked[index]) {
-      lock.widths[index] = lock.pinnedWidths[index] ?? lock.widths[index] ?? 0
+    const cell = lock.headerCells[index]
+    if (!cell) continue
+    const nextWidth = nextWidths[index] ?? 0
+    if (!lock.isApplied || Math.abs(nextWidth - (lock.widths[index] ?? 0)) > 0.01) {
+      applyColumnStyles(cell, nextWidth)
     }
+    lock.widths[index] = nextWidth
   }
-
-  let total = lock.widths.reduce((sum, value) => sum + value, 0)
-  const containerWidth = getTableScrollContainer(lock.table)?.clientWidth ?? 0
-
-  if (total < containerWidth) {
-    const flexibleIndexes = lock.widths
-      .map((_, index) =>
-        !lock.locked[index] && index !== lock.activeIndex ? index : -1,
-      )
-      .filter((index) => index >= 0)
-
-    if (flexibleIndexes.length > 0) {
-      const slack = containerWidth - total
-      const each = slack / flexibleIndexes.length
-      flexibleIndexes.forEach((index) => {
-        lock.widths[index] = (lock.widths[index] ?? 0) + each
-      })
-      total = containerWidth
-    }
-    // If only the active column is flexible, leave empty space — don't stretch pinned cols
-  }
-
-  lock.headerCells.forEach((cell, index) => {
-    applyColumnStyles(cell, lock.widths[index] ?? 0)
-  })
 
   lock.totalWidth = total
-  // Fill the viewport when possible; pinned lockWidth columns never receive slack
-  setTableContentWidth(lock.table, total, {
-    fillContainer: !lock.hasPinnedColumns || total >= containerWidth,
-  })
+  setResizeTableWidth(lock, total)
+  lock.isApplied = true
 }
 
-/** Freeze all header cells at their current measured widths and size the table to match. */
+/** Capture the rendered header geometry for a potential resize drag. */
 export const lockTableResizeLayout = (
   activeHeaderCell: HTMLElement,
   options?: LockTableResizeLayoutOptions,
@@ -494,21 +482,27 @@ export const lockTableResizeLayout = (
 
   const lockedSet = new Set(options?.lockedIndexes ?? [])
   const locked = headerCells.map((_, index) => lockedSet.has(index))
-  const widths = headerCells.map((cell, index) => measureCellWidth(cell, locked[index] ?? false))
-  const pinnedWidths = widths.map((width, index) => (locked[index] ? width : 0))
+  const initialWidths = headerCells.map(measureCellWidth)
+  const initialTotalWidth = initialWidths.reduce((sum, width) => sum + width, 0)
 
   const lock: ResizeLayoutLock = {
     table,
     headerCells,
-    widths,
-    pinnedWidths,
+    initialWidths,
+    widths: [...initialWidths],
+    nextWidths: [...initialWidths],
     locked,
     activeIndex,
-    totalWidth: 0,
-    hasPinnedColumns: locked.some(Boolean),
+    initialTotalWidth,
+    initialTableWidth: table.getBoundingClientRect().width,
+    totalWidth: initialTotalWidth,
+    originalTableWidth: table.style.width,
+    originalTableMinWidth: table.style.minWidth,
+    isApplied: false,
   }
 
-  syncResizeLayoutWidths(lock)
+  // Mouse-down only captures geometry. The first actual pointer movement
+  // applies the lock, so a click-and-release cannot mutate layout at all.
   return lock
 }
 
@@ -520,9 +514,32 @@ export const applyLockedColumnResize = (
   const clampedWidth = clampColumnWidth(activeWidth)
   if (lock.locked[lock.activeIndex]) return lock.widths[lock.activeIndex] ?? clampedWidth
 
-  lock.widths[lock.activeIndex] = clampedWidth
-  syncResizeLayoutWidths(lock)
+  syncResizeLayoutWidths(lock, clampedWidth)
   return clampedWidth
+}
+
+/** Exact visible, unlocked column geometry to persist after a resize. */
+export const getResizeLayoutColumnWidths = (
+  lock: ResizeLayoutLock,
+): Record<string, number> => {
+  const snapshot: Record<string, number> = {}
+
+  for (let index = 0; index < lock.headerCells.length; index++) {
+    if (lock.locked[index]) continue
+    const columnId = lock.headerCells[index]?.getAttribute('data-column-id')
+    const width = lock.widths[index]
+    if (!columnId || typeof width !== 'number' || !Number.isFinite(width) || width <= 0) continue
+    snapshot[columnId] = width
+  }
+
+  return snapshot
+}
+
+/** Restore the table's React-owned inline sizing after a resize session. */
+export const releaseTableResizeLayout = (lock: ResizeLayoutLock) => {
+  if (!lock.isApplied) return
+  lock.table.style.width = lock.originalTableWidth
+  lock.table.style.minWidth = lock.originalTableMinWidth
 }
 
 /**
@@ -549,9 +566,9 @@ export const applyColumnWidthToDom = (
 // Utility to apply consistent column styles
 const applyColumnStyles = (element: HTMLElement, width: number) => {
   const px = `${width}px`
-  element.style.width = px
-  element.style.minWidth = px
-  element.style.maxWidth = px
+  if (element.style.width !== px) element.style.width = px
+  if (element.style.minWidth !== px) element.style.minWidth = px
+  if (element.style.maxWidth !== px) element.style.maxWidth = px
 }
 
 // Clear inline column styles (header + body) after reset

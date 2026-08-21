@@ -111,6 +111,7 @@ export function useDataTableState<TData>({
     setColumnVisibility,
     setColumnOrder,
     setColumnWidth,
+    setColumnWidths,
     resetColumnWidth,
     resetTableState,
     resetToDefaults,
@@ -387,7 +388,6 @@ export function useDataTableState<TData>({
   
   const [resizeState, setResizeState] = useState<ResizeState>(createResizeState())
   const [resetInProgress, setResetInProgress] = useState(false)
-  const resizeEndTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // ============================================================================
   // AUTO-SELECTION LOGIC
@@ -451,19 +451,6 @@ export function useDataTableState<TData>({
   }, [])
 
   // ============================================================================
-  // CLEANUP
-  // ============================================================================
-  
-  useEffect(() => {
-    return () => {
-      if (resizeEndTimeoutRef.current) {
-        clearTimeout(resizeEndTimeoutRef.current)
-        resizeEndTimeoutRef.current = null
-      }
-    }
-  }, [])
-
-  // ============================================================================
   // RETURN STATE
   // ============================================================================
   
@@ -512,6 +499,7 @@ export function useDataTableState<TData>({
     columnWidths,
     columnOrder,
     setColumnWidth,
+    setColumnWidths,
     resetColumnWidth,
     
     // Data
@@ -527,7 +515,6 @@ export function useDataTableState<TData>({
     setResizeState,
     resetInProgress,
     setResetInProgress,
-    resizeEndTimeoutRef,
     
     // Store actions
     setSorting,
@@ -537,4 +524,4 @@ export function useDataTableState<TData>({
     resetTableState,
     resetToDefaults,
   }
-} 
+}

@@ -572,6 +572,7 @@ export interface TableState {
     | 'setColumnVisibility'
     | 'setColumnOrder'
     | 'setColumnWidth'
+    | 'setColumnWidths'
     | 'resetColumnWidth'
   >
   // Actions
@@ -580,6 +581,7 @@ export interface TableState {
   setColumnVisibility: (updaterOrValue: any) => void
   setColumnOrder: (updaterOrValue: any) => void
   setColumnWidth: (columnId: string, width: number) => void
+  setColumnWidths: (widths: Record<string, number>) => void
   resetColumnWidth: (columnId: string) => void
   resetTableState: () => void
   resetToDefaults: (defaultColumnVisibility: Record<string, boolean>) => void
@@ -813,4 +815,4 @@ export type {
   DragState,
   ResizeState,
   EffectiveIcons
-} 
+}

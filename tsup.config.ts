@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 
 const rootDir = dirname(fileURLToPath(import.meta.url))
 const distDir = resolve(rootDir, 'dist')
@@ -43,32 +43,6 @@ const ensureLicenseGlobals = () => {
   writeFileSync(cjsPath, cjs)
 }
 
-const ensureEntryImportsGlobals = () => {
-  const esmPath = resolve(distDir, 'index.js')
-  if (existsSync(esmPath)) {
-    const src = readFileSync(esmPath, 'utf8')
-    if (!src.includes("import './license.globals.mjs'") && !src.includes('import "./license.globals.mjs"')) {
-      writeFileSync(esmPath, `import './license.globals.mjs'\n` + src)
-    }
-  }
-
-  const cjsPath = resolve(distDir, 'index.cjs')
-  if (existsSync(cjsPath)) {
-    const src = readFileSync(cjsPath, 'utf8')
-    if (src.includes("require('./license.globals.cjs')") || src.includes('require("./license.globals.cjs")')) {
-      return
-    }
-    if (src.startsWith('"use strict";') || src.startsWith("'use strict';")) {
-      writeFileSync(
-        cjsPath,
-        src.replace(/^(['"])use strict\1;/, `$&\nrequire('./license.globals.cjs');`)
-      )
-      return
-    }
-    writeFileSync(cjsPath, `"use strict";\nrequire('./license.globals.cjs');\n` + src)
-  }
-}
-
 export default defineConfig({
   entry: ['src/index.ts'],
   format: ['esm', 'cjs'],
@@ -84,20 +58,20 @@ export default defineConfig({
   ],
   banner: ({ format }) => ({
     js: format === 'cjs'
-      ? `"use strict";\nrequire('./license.globals.cjs');`
-      : `import './license.globals.mjs';`,
+      ? `"use strict";\nrequire('./styles.css');\nrequire('./license.globals.cjs');`
+      : `import './styles.css';\nimport './license.globals.mjs';`,
   }),
   async onSuccess () {
     ensureLicenseGlobals()
-    ensureEntryImportsGlobals()
-    // Compile Tailwind utilities used by the package, then wire entry CSS import
     try {
-      execSync('node ./scripts/build-css.mjs && node ./scripts/finalize-build.mjs', {
-        cwd: rootDir,
-        stdio: 'inherit',
-      })
+      for (const script of ['build-css.mjs', 'finalize-build.mjs', 'verify-package.mjs']) {
+        execFileSync(process.execPath, [resolve(rootDir, 'scripts', script)], {
+          cwd: rootDir,
+          stdio: 'inherit',
+        })
+      }
     } catch (error) {
-      console.error('[tablefront] CSS finalize failed', error)
+      console.error('[tablefront] package finalization failed', error)
       throw error
     }
   },

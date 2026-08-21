@@ -15,8 +15,7 @@ const rootCss = resolve(pkgRoot, 'styles.css')
 
 const ensureCssExportAlias = () => {
   if (!existsSync(distCss)) {
-    console.warn('[tablefront] dist/styles.css missing — skip CSS export alias')
-    return
+    throw new Error('[tablefront] dist/styles.css missing — CSS build did not complete')
   }
   // Keep root styles.css as a compiled alias for `./styles.css` consumers / docs.
   copyFileSync(distCss, rootCss)

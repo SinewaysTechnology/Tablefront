@@ -37,6 +37,7 @@ export interface TableState {
     | 'setColumnVisibility'
     | 'setColumnOrder'
     | 'setColumnWidth'
+    | 'setColumnWidths'
     | 'resetColumnWidth'
   >
   // Actions
@@ -45,6 +46,8 @@ export interface TableState {
   setColumnVisibility: UpdaterFn<VisibilityState>
   setColumnOrder: UpdaterFn<ColumnOrderState>
   setColumnWidth: (columnId: string, width: number) => void
+  /** Atomically persist an exact rendered-width snapshot. */
+  setColumnWidths: (widths: Record<string, number>) => void
   resetColumnWidth: (columnId: string) => void
   resetTableState: () => void
   /**
@@ -122,6 +125,7 @@ export function createTableStore(options: TableStoreConfig) {
             setColumnVisibility,
             setColumnOrder,
             setColumnWidth,
+            setColumnWidths,
             resetColumnWidth,
             ...rest
           } = state
@@ -191,6 +195,29 @@ export function createTableStore(options: TableStoreConfig) {
           }));
         },
 
+        setColumnWidths: (widths: Record<string, number>) => {
+          set(state => {
+            const nextWidths = { ...state.columnWidths }
+            let changed = false
+
+            for (const [columnId, width] of Object.entries(widths)) {
+              const clampedWidth = Math.max(
+                RESIZE_CONSTRAINTS.MIN_WIDTH,
+                Math.min(RESIZE_CONSTRAINTS.MAX_WIDTH, width),
+              )
+              if (!Number.isFinite(clampedWidth) || clampedWidth <= 0) continue
+
+              const current = nextWidths[columnId]
+              if (current?.isUserSet && current.width === clampedWidth) continue
+
+              nextWidths[columnId] = { width: clampedWidth, isUserSet: true }
+              changed = true
+            }
+
+            return changed ? { columnWidths: nextWidths } : state
+          })
+        },
+
         resetColumnWidth: (columnId: string) => {
           set(state => {
             // Only reset if the column actually has a stored width
@@ -233,4 +260,4 @@ export function createTableStore(options: TableStoreConfig) {
       }
     )
   )
-} 
+}

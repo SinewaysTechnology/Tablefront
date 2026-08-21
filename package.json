@@ -84,17 +84,19 @@
   "license": "Commercial",
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "tag": "latest"
   },
   "type": "module",
   "bin": {
     "tablefront": "bin/cli.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node ./scripts/verify-package.mjs",
     "dev": "tsup --watch",
     "clean": "rimraf dist styles.css",
     "build:css": "node ./scripts/build-css.mjs",
+    "verify:package": "node ./scripts/verify-package.mjs",
     "prepublishOnly": "npm run clean && npm run build && node ./bin/cli.js stub",
     "typecheck": "tsc --noEmit"
   },

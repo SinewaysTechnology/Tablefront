@@ -1,46 +1,55 @@
 ### npm publish checklist
 
+Beta versions are still published under the **`latest`** dist-tag so
+`npm install @sineways/react-tablefront` resolves to the newest beta.
+`publishConfig.tag` in `package.json` enforces this even if `--tag` is omitted
+(npm would otherwise use the prerelease id `beta` as the dist-tag).
+
 - [ ] Confirm you are logged in to npm with publish rights for `@sineways`.
-Commands:
+
 ```bash
 npm whoami || npm login --scope=@sineways
 ```
-- [ ] Bump the `version` in `Tablefront/Tablefront/package.json` (SemVer or next beta).
-Commands (choose one):
-```bash
-# beta pre-release bump
-npm version prerelease --preid=beta
 
-# or stable bump
-npm version patch
-# npm version minor
-# npm version major
-```
-- [ ] Working tree clean; run typecheck/build locally; verify no errors.
-Commands:
+- [ ] Finish and commit the release changes, then verify the working tree is clean.
+
 ```bash
 git status --porcelain
 npm ci
 npm run typecheck
 npm run build
-```
-- [ ] Commit the version bump (e.g., "Release vX.Y.Z"), optionally create a matching tag.
-Commands (if needed; `npm version` already commits and tags):
-```bash
-git add package.json package-lock.json
-git commit -m "Release vX.Y.Z"
-git tag vX.Y.Z
-git push origin HEAD --tags
-```
-- [ ] From `Tablefront/Tablefront`, run the publish step. `prepublishOnly` will build.
-Commands:
-```bash
-npm publish --access public --tag latest
-```
-- [ ] Verify the new version on npm.
-Commands:
-```bash
-npm view @sineways/react-tablefront version
-npm view @sineways/react-tablefront versions --json
+npm pack --dry-run --json
 ```
 
+- [ ] When the release is ready, bump to the next beta. From
+  `1.0.0-beta.6`, this produces `1.0.0-beta.7`, updates `package.json` and
+  `package-lock.json`, creates a version commit, and tags it by default.
+
+```bash
+npm version prerelease --preid=beta
+```
+
+- [ ] Review the version commit and tag, then perform a final publish dry run.
+
+```bash
+git show --stat --oneline HEAD
+git tag --points-at HEAD
+npm publish --dry-run --access public
+```
+
+- [ ] From the package root, publish. The `latest` dist-tag comes from
+  `publishConfig.tag` (override only if intentional: `npm publish --tag …`).
+  `prepublishOnly` will clean, rebuild, verify, and stub the package before upload.
+
+```bash
+npm publish --access public
+```
+
+- [ ] Push the release commit and tag, then verify npm's `latest` tag and version.
+
+```bash
+git push origin HEAD --follow-tags
+npm view @sineways/react-tablefront version
+npm view @sineways/react-tablefront dist-tags --json
+npm view @sineways/react-tablefront versions --json
+```

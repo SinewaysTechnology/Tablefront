@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useCallback, useState, useMemo, KeyboardEvent, startTransition } from "react";
 import { useWindowResize } from './hooks/useWindowResize'
-import { DEFAULT_RESIZE_DOUBLE_CLICK_DELAY, DEFAULT_RESIZE_RESET_DEBOUNCE } from './constants/resize'
+import { DEFAULT_RESIZE_RESET_DEBOUNCE } from './constants/resize'
 import { 
   cn, 
   createDragState, 
@@ -13,10 +13,11 @@ import {
   createResizeState,
   applyResizeCursor,
   applyColumnWidthToDomImmediate,
-  clearColumnStyles,
   clampColumnWidth,
   lockTableResizeLayout,
   applyLockedColumnResize,
+  getResizeLayoutColumnWidths,
+  releaseTableResizeLayout,
   measureColumnWidthFromPointer,
   cssLengthToPx,
   type ResizeLayoutLock,
@@ -110,7 +111,6 @@ export function DataTable<TData>({
 }: DataTableProps<TData>) {
 
   // Extract timing configuration with defaults
-  const resizeDoubleClickDelay = resizeTimingConfig.doubleClickDelay ?? DEFAULT_RESIZE_DOUBLE_CLICK_DELAY
   const resizeResetDebounce = resizeTimingConfig.resetDebounce ?? DEFAULT_RESIZE_RESET_DEBOUNCE
   
   const tableStyles = useTableStyles(customStyles)
@@ -158,7 +158,7 @@ export function DataTable<TData>({
     effectiveColumns,
     columnVisibility,
     columnWidths,
-    setColumnWidth,
+    setColumnWidths,
     resetColumnWidth,
     filteredData,
     normalRows,
@@ -168,7 +168,6 @@ export function DataTable<TData>({
     setResizeState,
     resetInProgress,
     setResetInProgress,
-    resizeEndTimeoutRef,
     setPagination,
     setColumnOrder,
     columnOrder,
@@ -214,8 +213,10 @@ export function DataTable<TData>({
     parentContainerRef,
   })
   
-  // Live width overrides so React doesn't snap back to stale meta styles before store persist
-  const [widthOverrides, setWidthOverrides] = useState<Record<string, number>>({})
+  // Resizing writes widths directly to table cells for smooth pointer tracking.
+  // Remount the table after a full reset so none of those imperative styles can
+  // outlive the reset state, even when the persisted values were already empty.
+  const [tableResetVersion, setTableResetVersion] = useState(0)
 
   // Reset = one store write with the configured preset. Idempotent on repeat clicks.
   const handleResetTable = useCallback(() => {
@@ -226,7 +227,7 @@ export function DataTable<TData>({
     )
 
     resetToDefaults(defaults)
-    setWidthOverrides({})
+    setTableResetVersion((version) => version + 1)
     handleClearFilters()
     handleClearSearch()
   }, [
@@ -869,13 +870,6 @@ export function DataTable<TData>({
     e.preventDefault();
     e.stopPropagation();
     
-    // Cancel any pending resize end operation immediately
-    const hadPendingOperation = !!resizeEndTimeoutRef.current;
-    if (resizeEndTimeoutRef.current) {
-      clearTimeout(resizeEndTimeoutRef.current);
-      resizeEndTimeoutRef.current = null;
-    }
-    
     // Set flag to prevent any resize operations
     setResetInProgress(true);
     
@@ -885,41 +879,14 @@ export function DataTable<TData>({
       applyResizeCursor(false);
     }
     
-    setWidthOverrides((prev) => {
-      if (!(columnId in prev)) return prev
-      const { [columnId]: _removed, ...rest } = prev
-      return rest
-    })
-
-    // Check if there's actually a stored width to reset
-    const hasStoredWidth = columnWidths[columnId]?.isUserSet;
-    
-    if (hasStoredWidth) {
-      resetColumnWidth(columnId);
-      clearColumnStyles(columnId);
-    } else if (hadPendingOperation) {
-      // Restore automatic calculated width from column definition
-      const column = effectiveColumns.find(col => {
-        const accessorKey = (col as { accessorKey?: string }).accessorKey
-        return (col.id || String(accessorKey || '')) === columnId
-      });
-      
-      if (column) {
-        const widthStr = (column.meta as { style?: { width?: string } } | undefined)?.style?.width;
-        if (widthStr) {
-          const autoWidth = parseInt(String(widthStr).replace('px', ''), 10);
-          if (autoWidth > 0) {
-            applyColumnWidthToDomImmediate(columnId, autoWidth);
-          }
-        }
-      }
-    } else {
-      clearColumnStyles(columnId);
-    }
+    // Store reset + keyed remount is the single source of truth. Recreating the
+    // table guarantees drag-time inline widths cannot survive the reset.
+    resetColumnWidth(columnId)
+    setTableResetVersion((version) => version + 1)
     
     // Clear the reset flag
     setTimeout(() => setResetInProgress(false), resizeResetDebounce);
-      }, [enableColumnResize, resetColumnWidth, resizeState.isResizing, columnWidths, effectiveColumns, resizeResetDebounce, columnOverrides]);
+      }, [enableColumnResize, resetColumnWidth, resizeState.isResizing, resizeResetDebounce, columnOverrides]);
 
   // Cached layout lock + pending width for the active resize drag
   const resizeSessionRef = useRef<{
@@ -929,7 +896,8 @@ export function DataTable<TData>({
     /** pointerX - columnRight at drag start (hitslop grab correction) */
     edgeOffset: number
     rafId: number | null
-  }>({ headerCell: null, lock: null, lastWidth: 0, edgeOffset: 0, rafId: null })
+    didResize: boolean
+  }>({ headerCell: null, lock: null, lastWidth: 0, edgeOffset: 0, rafId: null, didResize: false })
 
   const tableContentWidth = useMemo(() => {
     if (!enableColumnResize) return undefined
@@ -939,12 +907,6 @@ export function DataTable<TData>({
 
     for (const column of visibleColumns) {
       const columnId = column.id
-      const override = widthOverrides[columnId]
-      if (typeof override === 'number' && override > 0) {
-        sum += override
-        continue
-      }
-
       const meta = column.columnDef.meta as { style?: React.CSSProperties } | undefined
       const fromStyle = cssLengthToPx(meta?.style?.width)
       if (fromStyle > 0) {
@@ -961,8 +923,10 @@ export function DataTable<TData>({
       sum += column.getSize()
     }
 
-    return sum > 0 ? Math.ceil(sum) : undefined
-  }, [enableColumnResize, expandable, table, widthOverrides, columnWidths, effectiveColumns, columnVisibility])
+    // Preserve sub-pixel geometry; rounding here makes a restored table wider
+    // than the exact snapshot and lets the browser redistribute the difference.
+    return sum > 0 ? sum : undefined
+  }, [enableColumnResize, expandable, table, columnWidths, effectiveColumns, columnVisibility])
 
   /**
    * Handles the start of a column resize operation
@@ -1019,6 +983,7 @@ export function DataTable<TData>({
       lastWidth: startWidth,
       edgeOffset,
       rafId: null,
+      didResize: false,
     }
     
     setResizeState({
@@ -1043,7 +1008,10 @@ export function DataTable<TData>({
     if (!headerCell) return
 
     const newWidth = measureColumnWidthFromPointer(e.clientX, headerCell, edgeOffset)
+    if (Math.abs(newWidth - resizeState.startWidth) <= 0.5) return
+
     resizeSessionRef.current.lastWidth = newWidth;
+    resizeSessionRef.current.didResize = true
 
     if (resizeSessionRef.current.rafId != null) return
 
@@ -1073,53 +1041,50 @@ export function DataTable<TData>({
       resizeSessionRef.current.rafId = null
     }
 
-    const { lock, headerCell, edgeOffset, lastWidth } = resizeSessionRef.current
+    const { lock, headerCell, edgeOffset, lastWidth, didResize } = resizeSessionRef.current
     const fromPointer = headerCell
       ? measureColumnWidthFromPointer(e.clientX, headerCell, edgeOffset)
       : clampColumnWidth(resizeState.startWidth + (e.clientX - resizeState.startX))
-    const finalWidth = lastWidth || fromPointer
+    const hasMeaningfulResize = didResize || Math.abs(fromPointer - resizeState.startWidth) > 0.5
+    const finalWidth = didResize ? lastWidth : fromPointer
     const currentColumnId = resizeState.columnId
 
+    if (!hasMeaningfulResize) {
+      if (lock) releaseTableResizeLayout(lock)
+      resizeSessionRef.current.headerCell = null
+      resizeSessionRef.current.lock = null
+      resizeSessionRef.current.didResize = false
+      setResizeState(createResizeState())
+      applyResizeCursor(false)
+      return
+    }
+
+    let widthSnapshot: Record<string, number>
     if (lock) {
       applyLockedColumnResize(lock, finalWidth)
-      // Drop drag-time inline table width so `w-full` can fill the viewport again.
-      // Column min/max widths (incl. lockWidth) keep pinned columns from stretching.
-      lock.table.style.width = ''
+      widthSnapshot = getResizeLayoutColumnWidths(lock)
+      releaseTableResizeLayout(lock)
     } else {
       applyColumnWidthToDomImmediate(currentColumnId, finalWidth, {
         headerCell,
         includeBodyCells: false,
       })
+      widthSnapshot = { [currentColumnId]: finalWidth }
     }
 
-    // Keep the dragged width in React immediately so re-render cannot snap back
-    // before the delayed store persist (double-click cancel window).
-    setWidthOverrides((prev) => ({ ...prev, [currentColumnId]: finalWidth }))
+    // Persist the entire final geometry synchronously and in one store write.
+    // A refresh immediately after mouse-up now restores the exact same widths.
+    setColumnWidths(widthSnapshot)
 
     resizeSessionRef.current.headerCell = null
     resizeSessionRef.current.lock = null
+    resizeSessionRef.current.didResize = false
     
     // Reset UI state immediately
     setResizeState(createResizeState());
     applyResizeCursor(false);
     
-    // Clear any existing timeout
-    if (resizeEndTimeoutRef.current) {
-      clearTimeout(resizeEndTimeoutRef.current);
-    }
-    
-    // Delay persisting to store to detect potential double-click
-    resizeEndTimeoutRef.current = setTimeout(() => {
-      setColumnWidth(currentColumnId, finalWidth);
-      setWidthOverrides((prev) => {
-        if (!(currentColumnId in prev)) return prev
-        const { [currentColumnId]: _removed, ...rest } = prev
-        return rest
-      })
-      resizeEndTimeoutRef.current = null;
-    }, resizeDoubleClickDelay);
-    
-      }, [resizeState, setColumnWidth, resetInProgress, resizeDoubleClickDelay]);
+      }, [resizeState, setColumnWidths, resetInProgress]);
 
   // Add global mouse event listeners for resize
   useEffect(() => {
@@ -1137,16 +1102,6 @@ export function DataTable<TData>({
       };
     }
   }, [resizeState.isResizing, handleResizeMove, handleResizeEnd]);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (resizeEndTimeoutRef.current) {
-        clearTimeout(resizeEndTimeoutRef.current);
-        resizeEndTimeoutRef.current = null;
-      }
-    };
-  }, []);
 
   // Memoize global drop zone to prevent unnecessary re-renders
   const globalDropZone = useMemo(() => {
@@ -1312,7 +1267,8 @@ export function DataTable<TData>({
           </>
         ) : (
             <>
-              <table 
+              <table
+                key={tableResetVersion}
                 className={cn(
                   tableStyles.table.table,
                   enableColumnResize && "table-fixed"
@@ -1340,18 +1296,6 @@ export function DataTable<TData>({
                             lockWidth?: boolean
                           } | undefined) || {}
                           const columnId = header.column.id || String(((header.column.columnDef as { accessorKey?: string })?.accessorKey) || '')
-                          const isWidthLocked =
-                            isColumnWidthLocked(columnOverrides, columnId) || !!meta.lockWidth
-                          const widthOverride = widthOverrides[header.column.id]
-                          const headerStyle =
-                            typeof widthOverride === 'number' && widthOverride > 0 && !isWidthLocked
-                              ? {
-                                  ...meta.style,
-                                  width: `${widthOverride}px`,
-                                  minWidth: `${widthOverride}px`,
-                                  maxWidth: `${widthOverride}px`,
-                                }
-                              : meta.style
                           
                           const sortIcon = canSort ? (
                             sortDirection === 'asc' ? (
@@ -1412,7 +1356,7 @@ export function DataTable<TData>({
                                 enableColumnResize && "relative",
                                 meta.className
                               )}
-                              style={headerStyle}
+                              style={meta.style}
                             >
                               <SmartHeader
                                 text={(() => {
