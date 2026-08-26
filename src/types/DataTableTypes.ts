@@ -582,7 +582,7 @@ export interface TableState {
   setColumnOrder: (updaterOrValue: any) => void
   setColumnWidth: (columnId: string, width: number) => void
   setColumnWidths: (widths: Record<string, number>) => void
-  resetColumnWidth: (columnId: string) => void
+  resetColumnWidth: (columnId: string, pinWidths?: Record<string, number>) => void
   resetTableState: () => void
   resetToDefaults: (defaultColumnVisibility: Record<string, boolean>) => void
 }

@@ -189,6 +189,59 @@ const prefersReducedMotion = (): boolean =>
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 
+const NATIVE_DRAG_IMAGE_ATTR = 'data-tablefront-native-drag-image'
+
+const removeNativeDragImage = () => {
+  if (typeof document === 'undefined') return
+  document.querySelectorAll(`[${NATIVE_DRAG_IMAGE_ATTR}]`).forEach((node) => node.remove())
+}
+
+/**
+ * Hide the browser's native drag bitmap.
+ *
+ * Chromium and WebKit on macOS ignore `setDragImage` unless the node is in the
+ * document, participates in layout, and has painted pixels. A detached empty
+ * canvas falls back to the page favicon (or Safari's globe), which then
+ * animates from the top-left of the window to the pointer.
+ */
+const hideNativeDragImage = (
+  dataTransfer: DataTransfer,
+  clientX: number,
+  clientY: number,
+) => {
+  removeNativeDragImage()
+
+  const nativeDragImage = document.createElement('canvas')
+  nativeDragImage.width = 1
+  nativeDragImage.height = 1
+  nativeDragImage.setAttribute(NATIVE_DRAG_IMAGE_ATTR, '')
+  nativeDragImage.setAttribute('aria-hidden', 'true')
+
+  const context = nativeDragImage.getContext('2d')
+  if (context) {
+    context.fillStyle = 'rgba(0, 0, 0, 0.01)'
+    context.fillRect(0, 0, 1, 1)
+  }
+
+  Object.assign(nativeDragImage.style, {
+    position: 'fixed',
+    left: `${clientX}px`,
+    top: `${clientY}px`,
+    width: '1px',
+    height: '1px',
+    display: 'block',
+    opacity: '1',
+    pointerEvents: 'none',
+    margin: '0',
+    padding: '0',
+    border: '0',
+  })
+
+  document.body.appendChild(nativeDragImage)
+  dataTransfer.effectAllowed = 'move'
+  dataTransfer.setDragImage(nativeDragImage, 0, 0)
+}
+
 /** Create a styled DOM ghost while hiding the browser's native drag bitmap. */
 export const setDragImage = (
   event: DragEvent,
@@ -198,6 +251,11 @@ export const setDragImage = (
   if (!event.dataTransfer || typeof document === 'undefined') return null
 
   const rect = element.getBoundingClientRect()
+  hideNativeDragImage(
+    event.dataTransfer,
+    Number.isFinite(event.clientX) ? event.clientX : rect.left,
+    Number.isFinite(event.clientY) ? event.clientY : rect.top,
+  )
 
   const resolveBackground = (source: HTMLElement): string => {
     let current: HTMLElement | null = source
@@ -272,12 +330,6 @@ export const setDragImage = (
 
   document.body.appendChild(ghost)
 
-  const transparentImage = document.createElement('canvas')
-  transparentImage.width = 1
-  transparentImage.height = 1
-  event.dataTransfer.effectAllowed = 'move'
-  event.dataTransfer.setDragImage(transparentImage, 0, 0)
-
   return ghost
 }
 
@@ -287,6 +339,7 @@ export const moveDragImage = (ghost: HTMLElement | null, left: number, top: numb
 }
 
 export const removeDragImage = (ghost: HTMLElement | null) => {
+  removeNativeDragImage()
   if (!ghost?.parentNode) return
   if (prefersReducedMotion()) {
     ghost.remove()

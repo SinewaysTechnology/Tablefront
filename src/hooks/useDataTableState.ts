@@ -18,7 +18,7 @@ import type {
   DataTableProps,
   ResizeState
 } from '../types/DataTableTypes'
-import { createResizeState } from '../utils'
+import { createResizeState, cssLengthToPx } from '../utils'
 import type { InitialColumnVisibilityConfig } from '../types/DataTableTypes'
 
 /**
@@ -212,12 +212,18 @@ export function useDataTableState<TData>({
       result = result.map(col => {
         const columnId = col.id || String(((col as { accessorKey?: string })?.accessorKey) || '')
         const existingMeta = (col.meta as { style?: React.CSSProperties; lockWidth?: boolean } | undefined) || {}
+        const measuredAutoWidth = cssLengthToPx(existingMeta.style?.width)
+          || (typeof col.size === 'number' && col.size > 0 ? col.size : 0)
+        const nextMeta = {
+          ...existingMeta,
+          autoWidth: measuredAutoWidth > 0 ? measuredAutoWidth : undefined,
+        }
 
         if (isColumnWidthLocked(columnOverrides, columnId) || existingMeta.lockWidth) {
           return {
             ...col,
             meta: {
-              ...existingMeta,
+              ...nextMeta,
               lockWidth: true,
               isManuallyResized: false,
             },
@@ -238,7 +244,7 @@ export function useDataTableState<TData>({
             ...col,
             size: columnWidthInfo.width,
             meta: {
-              ...existingMeta,
+              ...nextMeta,
               isManuallyResized: true,
               style: {
                 ...existingMeta.style,
@@ -254,7 +260,7 @@ export function useDataTableState<TData>({
           return {
             ...colWithoutSize,
             meta: {
-              ...existingMeta,
+              ...nextMeta,
               isManuallyResized: false,
               style: existingMeta.style
             }

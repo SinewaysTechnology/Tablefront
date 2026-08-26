@@ -6,7 +6,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { Updater, VisibilityState, SortingState, ColumnOrderState, PaginationState } from '@tanstack/react-table'
 import { STANDARD_PAGE_SIZE } from '../constants/pagination'
-import { RESIZE_CONSTRAINTS } from '../utils'
+import { clampColumnWidth } from '../utils'
 
 export type UpdaterFn<T> = (updaterOrValue: Updater<T>) => void
 
@@ -48,7 +48,7 @@ export interface TableState {
   setColumnWidth: (columnId: string, width: number) => void
   /** Atomically persist an exact rendered-width snapshot. */
   setColumnWidths: (widths: Record<string, number>) => void
-  resetColumnWidth: (columnId: string) => void
+  resetColumnWidth: (columnId: string, pinWidths?: Record<string, number>) => void
   resetTableState: () => void
   /**
    * Atomic reset of persisted table chrome to defaults.
@@ -61,6 +61,12 @@ export interface TableStoreConfig {
   name: string
   initialColumnVisibility?: VisibilityState
   initialPageSize?: number
+}
+
+const toUserColumnWidth = (width: number): number | undefined => {
+  const clampedWidth = clampColumnWidth(width)
+  if (!Number.isFinite(clampedWidth) || clampedWidth <= 0) return undefined
+  return clampedWidth
 }
 
 const createInitialState = (
@@ -177,16 +183,9 @@ export function createTableStore(options: TableStoreConfig) {
           }),
 
         setColumnWidth: (columnId: string, width: number) => {
-          const clampedWidth = Math.max(
-            RESIZE_CONSTRAINTS.MIN_WIDTH, 
-            Math.min(RESIZE_CONSTRAINTS.MAX_WIDTH, width)
-          );
-          
-          // Safeguard: ensure we never store invalid widths
-          if (clampedWidth <= 0 || !Number.isFinite(clampedWidth)) {
-            return;
-          }
-          
+          const clampedWidth = toUserColumnWidth(width)
+          if (clampedWidth == null) return
+
           set(state => ({
             columnWidths: {
               ...state.columnWidths,
@@ -201,11 +200,8 @@ export function createTableStore(options: TableStoreConfig) {
             let changed = false
 
             for (const [columnId, width] of Object.entries(widths)) {
-              const clampedWidth = Math.max(
-                RESIZE_CONSTRAINTS.MIN_WIDTH,
-                Math.min(RESIZE_CONSTRAINTS.MAX_WIDTH, width),
-              )
-              if (!Number.isFinite(clampedWidth) || clampedWidth <= 0) continue
+              const clampedWidth = toUserColumnWidth(width)
+              if (clampedWidth == null) continue
 
               const current = nextWidths[columnId]
               if (current?.isUserSet && current.width === clampedWidth) continue
@@ -218,17 +214,30 @@ export function createTableStore(options: TableStoreConfig) {
           })
         },
 
-        resetColumnWidth: (columnId: string) => {
+        resetColumnWidth: (columnId: string, pinWidths?: Record<string, number>) => {
           set(state => {
-            // Only reset if the column actually has a stored width
+            // Pins only exist to hold neighbors still while THIS column leaves
+            // the store. If it was never user-resized, do not persist others.
             if (!(columnId in state.columnWidths)) {
-              return state; // No change needed - already at automatic sizing
+              return state
             }
-            
-            const { [columnId]: removed, ...remainingWidths } = state.columnWidths;
-            return {
-              columnWidths: remainingWidths
-            };
+
+            const nextWidths = { ...state.columnWidths }
+            delete nextWidths[columnId]
+
+            if (pinWidths) {
+              for (const [id, width] of Object.entries(pinWidths)) {
+                if (id === columnId) continue
+                const clampedWidth = toUserColumnWidth(width)
+                if (clampedWidth == null) continue
+
+                const current = nextWidths[id]
+                if (current?.isUserSet && current.width === clampedWidth) continue
+                nextWidths[id] = { width: clampedWidth, isUserSet: true }
+              }
+            }
+
+            return { columnWidths: nextWidths }
           })
         },
           

@@ -25,6 +25,7 @@ import {
   type ResizeLayoutLock,
 } from './utils'
 import { buildDefaultColumnVisibility, isColumnWidthLocked } from './ColumnEditor'
+import { getAutomaticColumnWidth } from './columnBuilder'
 import { 
   useTableStyles
 } from './variants'
@@ -878,12 +879,16 @@ export function DataTable<TData>({
       x: Math.max(0, Math.min(targetRect.width, e.clientX - targetRect.left)),
       y: Math.max(0, Math.min(targetRect.height, e.clientY - targetRect.top)),
     }
+    // WebKit requires payload data before setDragImage; Chromium is fine either
+    // way. Set it first so Safari does not cancel the drag or fall back to a
+    // URL/globe bitmap.
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', columnId)
     dragGhostRef.current = setDragImage(
       e.nativeEvent,
       target,
       tableStyles.dragDrop.dragGhost,
     )
-    e.dataTransfer.setData('text/plain', columnId)
     
     if (headerRef.current) {
       headerCellsRef.current = Array.from(
@@ -1046,33 +1051,6 @@ export function DataTable<TData>({
   // COLUMN RESIZE EVENT HANDLERS
   // ============================================================================
 
-  /**
-   * Handles double-click to reset column width to automatic sizing
-   */
-  const handleResizeReset = useCallback((e: React.MouseEvent, columnId: string) => {
-    if (!enableColumnResize || isColumnWidthLocked(columnOverrides, columnId)) return;
-    
-    e.preventDefault();
-    e.stopPropagation();
-    
-    // Set flag to prevent any resize operations
-    setResetInProgress(true);
-    
-    // Reset any ongoing resize state first
-    if (resizeState.isResizing) {
-      setResizeState(createResizeState());
-      applyResizeCursor(false);
-    }
-    
-    // Store reset + keyed remount is the single source of truth. Recreating the
-    // table guarantees drag-time inline widths cannot survive the reset.
-    resetColumnWidth(columnId)
-    setTableResetVersion((version) => version + 1)
-    
-    // Clear the reset flag
-    setTimeout(() => setResetInProgress(false), resizeResetDebounce);
-      }, [enableColumnResize, resetColumnWidth, resizeState.isResizing, resizeResetDebounce, columnOverrides]);
-
   // Cached layout lock + pending width for the active resize drag
   const resizeSessionRef = useRef<{
     headerCell: HTMLElement | null
@@ -1083,6 +1061,105 @@ export function DataTable<TData>({
     rafId: number | null
     didResize: boolean
   }>({ headerCell: null, lock: null, lastWidth: 0, edgeOffset: 0, rafId: null, didResize: false })
+  const resetDebounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const collectLockedHeaderIndexes = useCallback((headerRow: Element | null) => {
+    const lockedIndexes: number[] = []
+    if (!headerRow) return lockedIndexes
+    Array.from(headerRow.children).forEach((cell, index) => {
+      const columnIdAttr = (cell as HTMLElement).getAttribute('data-column-id')
+      if (!columnIdAttr) {
+        // Expand-column gutter — treat as pinned
+        lockedIndexes.push(index)
+        return
+      }
+      if (isColumnWidthLocked(columnOverrides, columnIdAttr)) {
+        lockedIndexes.push(index)
+        return
+      }
+      const metaLock = (
+        table.getColumn(columnIdAttr)?.columnDef.meta as { lockWidth?: boolean } | undefined
+      )?.lockWidth
+      if (metaLock) lockedIndexes.push(index)
+    })
+    return lockedIndexes
+  }, [columnOverrides, table])
+
+  /**
+   * Double-click resets only this column to automatic width.
+   * Columns to the left keep their current widths; leftover space is absorbed
+   * by unlocked columns to the right (same layout rule as a shrink drag).
+   */
+  const handleResizeReset = useCallback((e: React.MouseEvent, columnId: string) => {
+    if (!enableColumnResize || isColumnWidthLocked(columnOverrides, columnId)) return
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (resizeSessionRef.current.rafId != null) {
+      cancelAnimationFrame(resizeSessionRef.current.rafId)
+      resizeSessionRef.current.rafId = null
+    }
+    if (resizeSessionRef.current.lock) {
+      releaseTableResizeLayout(resizeSessionRef.current.lock)
+      resizeSessionRef.current.lock = null
+    }
+    resizeSessionRef.current.headerCell = null
+    resizeSessionRef.current.didResize = false
+
+    if (resizeState.isResizing) {
+      setResizeState(createResizeState())
+      applyResizeCursor(false)
+    }
+
+    // Already at automatic sizing — pinning neighbors here would freeze every
+    // unlocked column as a user resize and change layout on a no-op double-click.
+    if (!(columnId in columnWidths)) return
+
+    setResetInProgress(true)
+
+    const headerCell = (e.currentTarget as HTMLElement).closest('th') as HTMLElement | null
+    const autoWidth = getAutomaticColumnWidth(
+      table.getColumn(columnId)?.columnDef,
+      data,
+    )
+
+    let pinWidths: Record<string, number> | undefined
+    if (headerCell) {
+      const lock = lockTableResizeLayout(headerCell, {
+        lockedIndexes: collectLockedHeaderIndexes(headerCell.parentElement),
+      })
+      if (lock) {
+        applyLockedColumnResize(lock, autoWidth)
+        const snapshot = getResizeLayoutColumnWidths(lock)
+        delete snapshot[columnId]
+        pinWidths = snapshot
+        releaseTableResizeLayout(lock)
+      }
+    }
+
+    // Pin neighbors in the same store write so a remount/re-render cannot
+    // proportionally redistribute leftover viewport space across every column.
+    resetColumnWidth(columnId, pinWidths)
+
+    if (resetDebounceTimeoutRef.current != null) {
+      clearTimeout(resetDebounceTimeoutRef.current)
+    }
+    resetDebounceTimeoutRef.current = setTimeout(() => {
+      resetDebounceTimeoutRef.current = null
+      setResetInProgress(false)
+    }, resizeResetDebounce)
+  }, [
+    enableColumnResize,
+    resetColumnWidth,
+    resizeState.isResizing,
+    resizeResetDebounce,
+    columnOverrides,
+    columnWidths,
+    table,
+    data,
+    collectLockedHeaderIndexes,
+  ])
 
   const tableContentWidth = useMemo(() => {
     if (!enableColumnResize) return undefined
@@ -1132,29 +1209,9 @@ export function DataTable<TData>({
     const headerCell = e.currentTarget.closest('th') as HTMLElement;
     if (!headerCell) return;
 
-    // Pin lockWidth columns (and expand gutter) so viewport-fill never stretches them
-    const headerRow = headerCell.parentElement
-    const lockedIndexes: number[] = []
-    if (headerRow) {
-      Array.from(headerRow.children).forEach((cell, index) => {
-        const columnIdAttr = (cell as HTMLElement).getAttribute('data-column-id')
-        if (!columnIdAttr) {
-          // Expand-column gutter — treat as pinned
-          lockedIndexes.push(index)
-          return
-        }
-        if (isColumnWidthLocked(columnOverrides, columnIdAttr)) {
-          lockedIndexes.push(index)
-          return
-        }
-        const metaLock = (
-          table.getColumn(columnIdAttr)?.columnDef.meta as { lockWidth?: boolean } | undefined
-        )?.lockWidth
-        if (metaLock) lockedIndexes.push(index)
-      })
-    }
-
-    const lock = lockTableResizeLayout(headerCell, { lockedIndexes })
+    const lock = lockTableResizeLayout(headerCell, {
+      lockedIndexes: collectLockedHeaderIndexes(headerCell.parentElement),
+    })
     const startRect = headerCell.getBoundingClientRect()
     const startWidth = lock
       ? (lock.widths[lock.activeIndex] ?? startRect.width)
@@ -1179,7 +1236,7 @@ export function DataTable<TData>({
     });
     
     applyResizeCursor(true);
-  }, [enableColumnResize, resetInProgress, columnOverrides, table]);
+  }, [enableColumnResize, resetInProgress, columnOverrides, collectLockedHeaderIndexes]);
 
   /**
    * Handles mouse move during column resize (rAF-coalesced).
@@ -1287,6 +1344,14 @@ export function DataTable<TData>({
       };
     }
   }, [resizeState.isResizing, handleResizeMove, handleResizeEnd]);
+
+  useEffect(() => {
+    return () => {
+      if (resetDebounceTimeoutRef.current != null) {
+        clearTimeout(resetDebounceTimeoutRef.current)
+      }
+    }
+  }, [])
 
   // Memoize global resize overlay to prevent unnecessary re-renders
   const globalResizeOverlay = useMemo(() => {

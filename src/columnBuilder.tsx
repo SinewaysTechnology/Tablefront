@@ -1,15 +1,13 @@
 import React from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { 
-  truncateAtWords, 
-  getSmartTruncationLength,
-  RESIZE_CONSTRAINTS
+  clampColumnWidth,
+  cssLengthToPx,
 } from './utils'
 
 // Use different constants for initial column sizing vs resize constraints
 const COLUMN_MIN_WIDTH = 70  // Minimum for initial auto-sizing
 const COLUMN_MAX_WIDTH = 400  // Maximum for initial auto-sizing
-// Note: RESIZE_CONSTRAINTS (50-800) are used for manual resize operations
 
 // Convert camelCase/snake_case field names to readable labels
 const formatFieldName = (field: string): string => {
@@ -178,6 +176,39 @@ export function applySmartSizing<TData>(
       }
     };
   });
+}
+
+/**
+ * Content/configured width a column would use without a user resize.
+ * Prefers `meta.autoWidth` (captured before a manual override), then the
+ * column's own style/size, then a fresh content measurement.
+ */
+export function getAutomaticColumnWidth<TData>(
+  column: ColumnDef<TData, any> | undefined,
+  data: TData[],
+): number {
+  if (!column) return COLUMN_MIN_WIDTH
+
+  const columnId = column.id || String(((column as { accessorKey?: string })?.accessorKey) || '')
+  const existingMeta = (column.meta as {
+    style?: React.CSSProperties
+    autoWidth?: number
+    isManuallyResized?: boolean
+  } | undefined) || {}
+
+  if (typeof existingMeta.autoWidth === 'number' && existingMeta.autoWidth > 0) {
+    return clampColumnWidth(existingMeta.autoWidth)
+  }
+
+  if (!existingMeta.isManuallyResized) {
+    const fromStyle = cssLengthToPx(existingMeta.style?.width)
+    if (fromStyle > 0) return clampColumnWidth(fromStyle)
+    if (typeof column.size === 'number' && column.size > 0) {
+      return clampColumnWidth(column.size)
+    }
+  }
+
+  return clampColumnWidth(calculateSmartColumnWidth(column, data, columnId))
 }
 
 // Helper function to detect data type and format value appropriately
