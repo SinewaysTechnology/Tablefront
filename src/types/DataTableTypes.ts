@@ -214,6 +214,12 @@ export interface DataTableProps<TData> {
    */
   searchPlaceholder?: string
   /**
+   * Idle time before search commits to filters / `onQueryChange`.
+   * Defaults to 250ms client-side and 400ms in server mode.
+   * Enter and blur flush immediately.
+   */
+  searchDebounceMs?: number
+  /**
    * Text displayed when there are no rows to show.
    * @default "No items found"
    */
@@ -232,9 +238,19 @@ export interface DataTableProps<TData> {
     result?: string
     /** Plural result-count label. @default "Results" */
     results?: string
+    /** Joiner in server-mode range copy (`1–50 of 40014`). @default "of" */
+    of?: string
     /** Column settings reset button. @default "Reset to defaults" */
     resetToDefaults?: string
   }
+  /**
+   * Server-side search, sort, and paging.
+   * When set (and `enabled` is not false), Tablefront does not filter, sort, or
+   * page `data` locally. With `paginationConfig`, `data` is the current page.
+   * With `infiniteScrollConfig.enabled`, `data` is all loaded rows (parent appends
+   * as `pageIndex` grows) and `total` is the match count.
+   */
+  server?: DataTableServerConfig
   /**
    * Global loading state for the table.
    * @default false
@@ -322,8 +338,45 @@ export interface DataTableLayout {
 }
 
 /**
- * Pagination configuration
+ * Query Tablefront emits when `server` mode is on.
+ * Map this to your API (`q`, `sort`, `order`, `limit`, `offset`).
  */
+export interface DataTableServerQuery {
+  /** Free-text search, including structured filter tokens if the user typed them. */
+  q: string
+  /** Sorted column id, or null when the user has not chosen a column. */
+  sort: string | null
+  order: 'asc' | 'desc'
+  pageIndex: number
+  pageSize: number
+}
+
+/**
+ * Opt into server-side querying. Omit (or `enabled: false`) for the default
+ * client-side search/sort/pagination over the full `data` array.
+ *
+ * Pair with `paginationConfig` for a pager, or `infiniteScrollConfig.enabled`
+ * to load the next page when the user scrolls (parent must append rows).
+ */
+export interface DataTableServerConfig {
+  /** @default true when the `server` prop is passed */
+  enabled?: boolean
+  /** Total matching rows on the server (not `data.length`). */
+  total: number
+  /**
+   * True while a server page is in flight. Blocks the next infinite-scroll
+   * request and shows the load-more indicator after the first page.
+   */
+  isFetching?: boolean
+  /** Called when search, sort, or page changes. Parent should fetch `data`. */
+  onQueryChange: (query: DataTableServerQuery) => void
+  /**
+   * Override search idle debounce in server mode.
+   * Falls back to `DataTable` `searchDebounceMs`, then 400ms.
+   */
+  searchDebounceMs?: number
+}
+
 export interface DataTablePaginationConfig {
   /**
    * Whether to auto-fit page size to the viewport.
@@ -791,14 +844,10 @@ export interface DataTableInteractionsHook<TData> {
  * DataTable search hook return type
  */
 export interface DataTableSearchHook {
-  searchValue: string
-  setSearchValue: (value: string) => void
-  debouncedSetSearchValue: (value: string) => void
-  clearSearch: () => void
-  handleSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  searchInputRef: React.RefObject<HTMLInputElement | null>
+  handleSearchCommit: (value: string) => void
   handleSearchKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void
   handleClearSearch: () => void
-  resetSearch: () => void
   handleClearFilters: () => void
 }
 

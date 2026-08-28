@@ -38,7 +38,7 @@ export default function UsersPage () {
 - **Zero configuration**: columns/search/filters auto-generated
 - **Layouts**: table, grid, masonry
 - **Interactions**: column drag, resize, expandable rows
-- **Search & filters**: field-aware, structured tokens, debounced search (~150ms)
+- **Search & filters**: field-aware, structured tokens, isolated search input (250ms client / 400ms server)
 - **Data loading**: pagination and infinite scroll (regular or adaptive)
 - **Presets**: default, modern, compact
 - **Overrides**: UI components, icons, styles
@@ -78,6 +78,7 @@ type DataTableProps<T> = {
   headerRightElement?: React.ReactNode
   customRenderGridItem?: (row: T, index: number, isSelected: boolean) => React.ReactNode
   searchPlaceholder?: string
+  searchDebounceMs?: number
   emptyStateText?: string
   loadingText?: string
   isLoading?: boolean
@@ -100,6 +101,19 @@ type DataTableProps<T> = {
   // Paging & infinite scroll
   paginationConfig?: { autoFit?: boolean, pageSize?: number }
   infiniteScrollConfig?: { enabled?: boolean, adaptive?: boolean, loadThreshold?: number, pageSize?: number, increment?: number, maxItems?: number }
+  server?: {
+    enabled?: boolean
+    total: number
+    isFetching?: boolean
+    onQueryChange: (query: {
+      q: string
+      sort: string | null
+      order: 'asc' | 'desc'
+      pageIndex: number
+      pageSize: number
+    }) => void
+    searchDebounceMs?: number
+  }
 
   // Column interactions
   enableColumnDrag?: boolean
@@ -177,7 +191,7 @@ Disable either prop to allow the respective content to span the full table conte
 ```
 
 ## Search & Filters
-- Free text across searchable fields (search is debounced ~150ms internally)
+- Free text across searchable fields. The input keeps a local draft so typing does not re-render the table. Search commits after 250ms idle (400ms in server mode), or immediately on Enter / blur. Override with `searchDebounceMs`.
 - Structured tokens via `FilterProcessor`
 - Field types: `string | number | date`
 - Operators: `> < >= <= = != * !*`
@@ -226,6 +240,63 @@ Examples:
   infiniteScrollConfig={{ enabled: true, adaptive: true, pageSize: 50, maxItems: 150 }}
 />
 ```
+
+## Server-side search, sort, and paging
+Pass `server` to stop Tablefront from filtering, sorting, or slicing `data` locally. Omit `server` (or set `enabled: false`) for the default client-side behaviour.
+
+Paged (`paginationConfig`): `data` is the current page; `total` is the match count.
+
+```tsx
+<DataTable
+  data={page.items}
+  isLoading={isLoading}
+  paginationConfig={{ pageSize: 50 }}
+  server={{
+    total: page.total,
+    onQueryChange: ({ q, sort, order, pageIndex, pageSize }) => {
+      void fetchPage({
+        q: q || undefined,
+        sort: sort ?? 'created_at',
+        order: sort ? order : 'desc',
+        limit: pageSize,
+        offset: pageIndex * pageSize,
+      })
+    },
+  }}
+/>
+```
+
+Infinite scroll (`infiniteScrollConfig.enabled`): `data` is all rows loaded so far. Append the next page when `pageIndex` grows; replace `data` when search or sort changes. Do not pass `paginationConfig` at the same time — infinite scroll wins.
+
+```tsx
+<DataTable
+  data={loadedRows}
+  isLoading={isLoading}
+  infiniteScrollConfig={{ enabled: true, virtualized: true, pageSize: 50 }}
+  server={{
+    total,
+    isFetching,
+    onQueryChange: ({ q, sort, order, pageIndex, pageSize }) => {
+      void fetchPage({
+        q: q || undefined,
+        sort: sort ?? 'created_at',
+        order: sort ? order : 'desc',
+        limit: pageSize,
+        offset: pageIndex * pageSize,
+      })
+    },
+  }}
+/>
+```
+
+Notes:
+- The first sort click uses descending order (`sortDescFirst`).
+- Search still uses Tablefront’s input (400ms idle debounce in server mode; Enter / blur flush immediately) and emits `q`.
+- Field filters in the popover become part of `q` as typed tokens (`field:operatorvalue`). Parse those tokens on the API, or set `layout.showFilterButton` to `false`.
+- Search and filter changes reset `pageIndex` to `0`. Replace loaded rows when `q` / `sort` / `order` change.
+- Pass `isFetching` (or `isLoading` for every in-flight page) so scroll-load waits before requesting the next page.
+- Infinite scroll shows the total only (`40,014 Resultaten`), not a page range.
+- The next server page is requested about a viewport ahead of the bottom while scrolling, still one request at a time. Sitting at the top of a filled viewport does not prefetch.
 
 ## UI Overrides
 Supply your UI primitives:

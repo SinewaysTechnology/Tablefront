@@ -5,7 +5,6 @@
   [data-tablefront-root],[data-tablefront-root] {
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
     monospace;
-    --color-amber-300: oklch(87.9% 0.169 91.605);
     --color-blue-50: oklch(97% 0.014 254.604);
     --color-blue-200: oklch(88.2% 0.059 254.128);
     --color-blue-400: oklch(70.7% 0.165 254.624);
@@ -579,9 +578,6 @@
       border-color: color-mix(in oklab, var(--primary, #0f172a) 50%, transparent);
     }
   }
-  [data-tablefront-root] .bg-amber-300 {
-    background-color: var(--color-amber-300);
-  }
   [data-tablefront-root] .bg-background {
     background-color: var(--background, #ffffff);
   }
@@ -1085,6 +1081,10 @@
   }
   [data-tablefront-root] .ring-offset-background {
     --tw-ring-offset-color: var(--background, #ffffff);
+  }
+  [data-tablefront-root] .blur {
+    --tw-blur: blur(8px);
+    filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,);
   }
   [data-tablefront-root] .filter {
     filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,);

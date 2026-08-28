@@ -42,7 +42,8 @@ import { DataTableBody } from './components/DataTableBody';
 import { DataGrid } from './components/DataGrid';
 import { DataMasonry } from './components/DataMasonry';
 import { useDataTableState } from './hooks/useDataTableState';
-import { useDataTableSearch } from './hooks/useDataTableSearch';
+import { useDataTableSearch } from './hooks/useDataTableSearch'
+import { resolveSearchDebounceMs } from './utils/searchDebounce'
 import { useInfiniteScrollManager } from './components/InfiniteScrollManager';
 import { useDataTableVirtualizer } from './hooks/useDataTableVirtualizer';
 
@@ -100,6 +101,7 @@ export function DataTable<TData>({
   customStaticRowsSticky = true,
 
   searchPlaceholder = 'Search...',
+  searchDebounceMs,
   emptyStateText = 'No items found',
   loadingText = 'Loading...',
   labels,
@@ -111,6 +113,7 @@ export function DataTable<TData>({
   enableColumnDrag = true,
   enableColumnResize = true,
   resizeTimingConfig = {},
+  server,
 }: DataTableProps<TData>) {
 
   // Extract timing configuration with defaults
@@ -142,6 +145,11 @@ export function DataTable<TData>({
     manualSelectionTimeoutRef,
     setRecentManualSelection,
     isUsingPagination,
+    isServerMode,
+    isServerInfinite,
+    serverTotal,
+    serverIsFetching,
+    effectivePageSize,
     showHeader,
     showTableHeaders,
     showSearchBar,
@@ -193,6 +201,7 @@ export function DataTable<TData>({
     enableColumnResize,
     customStaticRows,
     customStaticRowsSticky,
+    server,
   })
 
 
@@ -200,15 +209,18 @@ export function DataTable<TData>({
   const parentContainerRef = useRef<HTMLDivElement>(null);
 
   // Use the extracted search hook
+  const resolvedSearchDebounceMs = resolveSearchDebounceMs({
+    isServerMode,
+    searchDebounceMs: searchDebounceMs ?? server?.searchDebounceMs,
+  })
+
   const {
-    searchValue,
     searchInputRef,
-    handleSearchChange,
+    handleSearchCommit,
     handleSearchKeyDown,
     handleClearSearch,
     handleClearFilters,
   } = useDataTableSearch({
-    storeSearchValue,
     setStoreSearchValue,
     filterProcessor,
     filters,
@@ -231,14 +243,12 @@ export function DataTable<TData>({
 
     resetToDefaults(defaults)
     setTableResetVersion((version) => version + 1)
-    handleClearFilters()
     handleClearSearch()
   }, [
     effectiveColumns,
     initialColumnVisibility,
     columnOverrides,
     resetToDefaults,
-    handleClearFilters,
     handleClearSearch,
   ])
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -469,6 +479,9 @@ export function DataTable<TData>({
     setPagination,
     infiniteScrollConfig,
     isUsingPagination,
+    isServerInfinite,
+    serverTotal: serverTotal ?? 0,
+    isFetching: serverIsFetching || (isServerInfinite && isLoading),
     displayMode,
     windowSize,
     listResetKey,
@@ -1383,10 +1396,11 @@ export function DataTable<TData>({
       <LicenseEnforcer containerRef={parentContainerRef} />
       <DataTableHeader
         searchPlaceholder={searchPlaceholder}
-        searchValue={searchValue}
-        onSearchChange={handleSearchChange}
+        searchValue={storeSearchValue}
+        onSearchCommit={handleSearchCommit}
         onSearchKeyDown={handleSearchKeyDown}
-        onClearSearch={handleClearSearch}
+        searchDebounceMs={resolvedSearchDebounceMs}
+        searchResetKey={tableResetVersion}
         searchInputRef={searchInputRef}
         filterStore={filterStore}
         filters={filters}
@@ -1399,7 +1413,9 @@ export function DataTable<TData>({
           showResetTableButtonInSettings: layout.showResetTableButtonInSettings,
         }}
         headerRightElement={headerRightElement}
-        filteredDataLength={filteredData.length}
+        filteredDataLength={isServerMode ? (serverTotal ?? 0) : filteredData.length}
+        resultOffset={isServerMode && !isServerInfinite ? (pagination.pageIndex || 0) * effectivePageSize : undefined}
+        resultLimit={isServerMode && !isServerInfinite ? effectivePageSize : undefined}
         labels={labels}
         table={table}
                 uiComponents={mergedUIComponents}
@@ -1517,7 +1533,7 @@ export function DataTable<TData>({
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
               >
-                {showTableHeaders && effectiveDisplayRows.length > 0 && (
+                {showTableHeaders && (
                   <thead
                     className={cn(
                       tableStyles.table.tableHeader,

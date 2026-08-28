@@ -157,6 +157,21 @@ Key optional props (selected):
     maxItems?: number
   }
 
+  // Server-side querying (search, sort, and page happen on your API)
+  server?: {
+    enabled?: boolean
+    total: number
+    isFetching?: boolean
+    onQueryChange: (query: {
+      q: string
+      sort: string | null
+      order: 'asc' | 'desc'
+      pageIndex: number
+      pageSize: number
+    }) => void
+    searchDebounceMs?: number
+  }
+
   // Feature toggles
   enableColumnDrag?: boolean
   enableColumnResize?: boolean
@@ -188,6 +203,40 @@ Notes:
 - Field types: `number`, `string`, `date`
 - Operators: `> < >= <= = != * !*`
 - Field overrides support `path`, `aliases`, `preferredValues`, `defaultOperator`, `defaultNumericValue`, `isPercentage`, etc.
+
+## Server mode
+Pass `server` so search, sort, and paging run on your API. Omit `server` (or `enabled: false`) for client-side behaviour.
+
+**Paged:** `data` is one page. Use `paginationConfig`.
+
+```tsx
+<DataTable
+  data={page.items}
+  paginationConfig={{ pageSize: 50 }}
+  server={{
+    total: page.total,
+    onQueryChange: ({ q, sort, order, pageIndex, pageSize }) => {
+      void loadPage({ q, sort, order, limit: pageSize, offset: pageIndex * pageSize })
+    },
+  }}
+/>
+```
+
+**Infinite scroll:** pass `infiniteScrollConfig.enabled` instead of a pager. `data` is every loaded row — append when `pageIndex` increases; replace when `q` / `sort` / `order` change. Search and filter changes reset `pageIndex` to `0`. Pass `isFetching` (or `isLoading` for every in-flight page) so the next page is not requested while one is already loading.
+
+```tsx
+<DataTable
+  data={loadedRows}
+  infiniteScrollConfig={{ enabled: true, virtualized: true, pageSize: 50 }}
+  server={{
+    total,
+    isFetching,
+    onQueryChange: ({ q, sort, order, pageIndex, pageSize }) => {
+      void loadPage({ q, sort, order, limit: pageSize, offset: pageIndex * pageSize })
+    },
+  }}
+/>
+```
 
 Examples:
 ```txt

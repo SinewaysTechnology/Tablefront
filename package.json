@@ -98,7 +98,8 @@
     "build:css": "node ./scripts/build-css.mjs",
     "verify:package": "node ./scripts/verify-package.mjs",
     "prepublishOnly": "npm run clean && npm run build && node ./bin/cli.js stub",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/utils/*.test.ts"
   },
   "peerDependencies": {
     "@tanstack/react-table": ">=8.0.0 <9",

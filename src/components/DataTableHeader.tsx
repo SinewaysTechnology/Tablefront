@@ -1,11 +1,13 @@
-import React, { useRef, useCallback, useState, useEffect, ChangeEvent, KeyboardEvent, useMemo } from 'react'
+import React, { useRef, useCallback, ChangeEvent, KeyboardEvent, useMemo } from 'react'
 import { FilterPopover } from '../FilterPopover'
 import { ColumnVisibilityPopover } from '../ColumnVisibilityPopover'
 import { SimpleButton } from '../defaultUIComponents'
+import { DebouncedSearchField } from './DebouncedSearchField'
 import type { 
   DataTableIcons, 
   DataTableUIComponents
 } from '../types/DataTableTypes'
+import { formatTableResultCount } from '../utils/resultCount'
 
 /**
  * Props for the DataTableHeader component
@@ -14,9 +16,10 @@ export interface DataTableHeaderProps<TData> {
   // Search functionality
   searchPlaceholder?: string
   searchValue: string
-  onSearchChange: (e: ChangeEvent<HTMLInputElement>) => void
+  onSearchCommit: (value: string) => void
   onSearchKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void
-  onClearSearch: () => void
+  searchDebounceMs: number
+  searchResetKey?: number
   searchInputRef?: React.RefObject<HTMLInputElement | null>
   
   // Filter functionality
@@ -37,10 +40,14 @@ export interface DataTableHeaderProps<TData> {
   // Header elements
   headerRightElement?: React.ReactNode
   filteredDataLength: number
+  /** When set with resultLimit, the count is shown as a page range (server mode). */
+  resultOffset?: number
+  resultLimit?: number
   /** Singular/plural labels for the result count and settings actions. */
   labels?: {
     result?: string
     results?: string
+    of?: string
     resetToDefaults?: string
   }
   
@@ -83,9 +90,10 @@ export interface DataTableHeaderProps<TData> {
 export const DataTableHeader = React.memo(<TData,>({
   searchPlaceholder = 'Search...',
   searchValue,
-  onSearchChange,
+  onSearchCommit,
   onSearchKeyDown,
-  onClearSearch,
+  searchDebounceMs,
+  searchResetKey = 0,
   searchInputRef: externalSearchInputRef,
   filterStore,
   filters,
@@ -94,6 +102,8 @@ export const DataTableHeader = React.memo(<TData,>({
   layout,
   headerRightElement,
   filteredDataLength,
+  resultOffset,
+  resultLimit,
   labels,
   table,
   uiComponents,
@@ -102,7 +112,16 @@ export const DataTableHeader = React.memo(<TData,>({
 }: DataTableHeaderProps<TData>) => {
   const resultLabel = labels?.result ?? 'Result'
   const resultsLabel = labels?.results ?? 'Results'
+  const ofLabel = labels?.of ?? 'of'
   const resetToDefaultsLabel = labels?.resetToDefaults ?? 'Reset to defaults'
+  const resultCountText = formatTableResultCount({
+    total: filteredDataLength,
+    resultOffset,
+    resultLimit,
+    resultLabel,
+    resultsLabel,
+    ofLabel,
+  })
   const internalSearchInputRef = useRef<HTMLInputElement>(null)
   const searchInputRef = externalSearchInputRef || internalSearchInputRef
   
@@ -119,16 +138,10 @@ export const DataTableHeader = React.memo(<TData,>({
   const ClearSearchBtn = useMemo(() => ClearSearchButton || Button || SimpleButton, [ClearSearchButton, Button])
   const ClearFiltersBtn = useMemo(() => Button || SimpleButton, [Button])
 
-  const handleSearchChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    onSearchChange(e)
-  }, [onSearchChange])
+  const handleSearchCommit = useCallback((value: string) => {
+    onSearchCommit(value)
+  }, [onSearchCommit])
 
-  const handleClearSearch = useCallback(() => {
-    onClearSearch()
-    searchInputRef.current?.focus()
-  }, [onClearSearch, searchInputRef])
-
-  // Search bar component - memoized to prevent re-renders
   const SearchBar = useMemo(() => {
     if (!layout.showSearchBar || !filterStore) {
       return null
@@ -138,38 +151,28 @@ export const DataTableHeader = React.memo(<TData,>({
       <div className={tableStyles.searchBar.wrapper}>
         <div className={tableStyles.searchBar.containerWrapper}>
           <div className={tableStyles.searchBar.container}>
-          {/* <div className="bg-amber-300"> */}
             {icons.Search && (
               <icons.Search 
                 className={tableStyles.searchBar.icon}
               />
             )}
             
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchValue}
-              onChange={handleSearchChange}
+            <DebouncedSearchField
+              key={searchResetKey}
+              committedValue={searchValue}
+              onCommit={handleSearchCommit}
+              debounceMs={searchDebounceMs}
               onKeyDown={onSearchKeyDown}
               placeholder={searchPlaceholder}
+              inputRef={searchInputRef}
               className={tableStyles.searchBar.input}
-              aria-label={`Search ${filteredDataLength} records`}
-              title="Search"
-              suppressHydrationWarning
+              ariaLabel={`Search ${filteredDataLength} records`}
+              ClearSearchBtn={ClearSearchBtn}
+              clearButtonClassName={tableStyles.searchBar.clearButton}
+              clearButtonIcon={icons.X ? (
+                <icons.X className={tableStyles.searchBar.clearButtonIcon} />
+              ) : null}
             />
-            
-            {searchValue && ClearSearchBtn && (
-              <ClearSearchBtn
-                type="button"
-                onClick={handleClearSearch}
-                aria-label="Clear search"
-                className={tableStyles.searchBar.clearButton}
-              >
-                {icons.X && (
-                  <icons.X className={tableStyles.searchBar.clearButtonIcon} />
-                )}
-              </ClearSearchBtn>
-            )}
           </div>
         </div>
       </div>
@@ -179,11 +182,12 @@ export const DataTableHeader = React.memo(<TData,>({
     filterStore,
     searchValue,
     searchPlaceholder,
+    searchDebounceMs,
+    searchResetKey,
     filteredDataLength,
     searchInputRef,
-    handleSearchChange,
+    handleSearchCommit,
     onSearchKeyDown,
-    handleClearSearch,
     ClearSearchBtn,
     icons.Search,
     icons.X,
@@ -200,7 +204,7 @@ export const DataTableHeader = React.memo(<TData,>({
       <div className={tableStyles.header.container}>
         <div className={tableStyles.header.leftSection}>
           <span className={tableStyles.header.resultCount}>
-            {`${filteredDataLength === 1 ? resultLabel : resultsLabel}: ${filteredDataLength}`}
+            {resultCountText}
           </span>
 
           {filterStore && hasColumnFilters && ClearFiltersBtn && (
@@ -250,9 +254,7 @@ export const DataTableHeader = React.memo(<TData,>({
     tableStyles.header,
     tableStyles.columnVisibility,
     tableStyles.filterPopover,
-    filteredDataLength,
-    resultLabel,
-    resultsLabel,
+    resultCountText,
     resetToDefaultsLabel,
     filterStore,
     hasColumnFilters,

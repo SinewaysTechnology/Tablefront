@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { PaginationState } from '@tanstack/react-table'
-import { INFINITE_SCROLL_INCREMENT, SCROLL_THRESHOLD } from '../constants/pagination'
+import { INFINITE_SCROLL_INCREMENT, SCROLL_THRESHOLD, STANDARD_PAGE_SIZE } from '../constants/pagination'
 import { getScrollElement } from '../utils/scrollElement'
+import { resolveEstimateSize, shouldPrefetchNextServerPage } from '../utils/serverInfiniteScroll'
 import { useWindowedRows } from '../hooks/useWindowedRows'
 
 import type { InfiniteScrollConfig } from '../types/DataTableTypes'
@@ -20,6 +21,12 @@ interface UseInfiniteScrollManagerParams<TData> {
   setPagination: (updater: PaginationState | ((prev: PaginationState) => PaginationState)) => void
   infiniteScrollConfig?: InfiniteScrollConfig
   isUsingPagination: boolean
+  /** Server mode + `infiniteScrollConfig.enabled`: fetch the next page instead of growing local pageSize. */
+  isServerInfinite?: boolean
+  /** Server match count. Used to stop loading when every row is present. */
+  serverTotal?: number
+  /** True while the parent is fetching a server page. */
+  isFetching?: boolean
   displayMode: 'table' | 'grid' | 'masonry'
   windowSize?: { width: number; height: number }
   /** Fingerprint for window resets (filter/sort/data identity). */
@@ -35,13 +42,16 @@ export function useInfiniteScrollManager<TData>({
   setPagination,
   infiniteScrollConfig,
   isUsingPagination,
+  isServerInfinite = false,
+  serverTotal = 0,
+  isFetching = false,
   displayMode,
   windowSize,
   listResetKey,
 }: UseInfiniteScrollManagerParams<TData>) {
-  const wantsInfinite = !!infiniteScrollConfig?.enabled && !isUsingPagination
+  const wantsInfinite = (!!infiniteScrollConfig?.enabled && !isUsingPagination) || isServerInfinite
   const wantsDomVirtualization =
-    !isUsingPagination &&
+    (isServerInfinite || !isUsingPagination) &&
     displayMode !== 'masonry' &&
     !!(
       infiniteScrollConfig?.virtualized ||
@@ -63,6 +73,7 @@ export function useInfiniteScrollManager<TData>({
   // `fullList: false` keeps the old growing-pageSize behavior even without knobs.
   const wantsFullList =
     wantsInfinite &&
+    !isServerInfinite &&
     (infiniteScrollConfig?.fullList === true ||
       (infiniteScrollConfig?.fullList !== false && !hasProgressiveSizing))
 
@@ -70,14 +81,15 @@ export function useInfiniteScrollManager<TData>({
   const maxItems = infiniteScrollConfig?.maxItems
   const wantsWindowed =
     wantsInfinite &&
+    !isServerInfinite &&
     !wantsFullList &&
     typeof maxItems === 'number' &&
     maxItems > 0 &&
     displayMode !== 'masonry'
 
-  // Growing pageSize when infinite is on and we're not using full-list or windowed mode.
+  // Growing pageSize when infinite is on and we're not using full-list, windowed, or server mode.
   const shouldEnableGrowingScroll =
-    wantsInfinite && !wantsFullList && !wantsWindowed
+    wantsInfinite && !isServerInfinite && !wantsFullList && !wantsWindowed
 
   const loadThreshold = infiniteScrollConfig?.loadThreshold ?? SCROLL_THRESHOLD
 
@@ -102,9 +114,15 @@ export function useInfiniteScrollManager<TData>({
   const loadingLockRef = useRef(false)
   const paginationRef = useRef(pagination)
   const normalRowsLengthRef = useRef(normalRows.length)
+  const serverTotalRef = useRef(serverTotal)
+  const isFetchingRef = useRef(isFetching)
+  const loadedAtRequestRef = useRef(0)
+  const wasFetchingRef = useRef(false)
 
   paginationRef.current = pagination
   normalRowsLengthRef.current = normalRows.length
+  serverTotalRef.current = serverTotal
+  isFetchingRef.current = isFetching
 
   const loadMoreItems = useCallback(() => {
     if (!shouldEnableGrowingScroll || loadingLockRef.current) return
@@ -202,13 +220,120 @@ export function useInfiniteScrollManager<TData>({
     return () => cancelAnimationFrame(id)
   }, [windowSize, shouldEnableGrowingScroll, scrollAreaRef, loadMoreItems, loadThreshold])
 
-  const effectiveDisplayRows = wantsFullList
-    ? sortedRows
-    : windowEnabled
-      ? windowRows
-      : displayRows
+  const loadMoreServerPages = useCallback(() => {
+    if (!isServerInfinite || loadingLockRef.current || isFetchingRef.current) return
 
-  const effectiveIsLoadingMore = windowEnabled ? windowIsLoadingMore : isLoadingMore
+    const loaded = normalRowsLengthRef.current
+    const total = serverTotalRef.current
+    if (total <= 0 || loaded >= total) return
+
+    const pageIndex = paginationRef.current.pageIndex || 0
+    const pageSize =
+      infiniteScrollConfig?.pageSize ||
+      paginationRef.current.pageSize ||
+      STANDARD_PAGE_SIZE
+    const haveCurrentPage = loaded >= Math.min((pageIndex + 1) * pageSize, total || Number.POSITIVE_INFINITY)
+    if (!haveCurrentPage) return
+
+    loadedAtRequestRef.current = loaded
+    loadingLockRef.current = true
+    setIsLoadingMore(true)
+    setPagination((prev: PaginationState) => ({
+      ...prev,
+      pageIndex: (prev.pageIndex || 0) + 1,
+    }))
+  }, [infiniteScrollConfig?.pageSize, isServerInfinite, setPagination])
+
+  useEffect(() => {
+    if (!isServerInfinite) return
+    if (normalRows.length > loadedAtRequestRef.current) {
+      loadingLockRef.current = false
+      setIsLoadingMore(false)
+    }
+    if (isFetching) {
+      wasFetchingRef.current = true
+      return
+    }
+    if (wasFetchingRef.current) {
+      wasFetchingRef.current = false
+      loadingLockRef.current = false
+      setIsLoadingMore(false)
+    }
+  }, [isServerInfinite, isFetching, normalRows.length])
+
+  useEffect(() => {
+    if (!isServerInfinite) return
+    if ((pagination.pageIndex || 0) !== 0) return
+    loadingLockRef.current = false
+    loadedAtRequestRef.current = 0
+  }, [isServerInfinite, pagination.pageIndex])
+
+  useEffect(() => {
+    if (!isServerInfinite) return
+
+    const scrollElement = getScrollElement(scrollAreaRef)
+    if (!scrollElement) return
+
+    let rafId: number | null = null
+    let needsCheck = false
+
+    const runCheck = () => {
+      rafId = null
+      needsCheck = false
+      if (loadingLockRef.current || isFetchingRef.current) return
+
+      const { scrollTop, scrollHeight, clientHeight } = scrollElement
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const estimate = resolveEstimateSize(infiniteScrollConfig?.estimateSize)
+      const loaded = normalRowsLengthRef.current
+      if (
+        shouldPrefetchNextServerPage({
+          distanceFromBottom,
+          clientHeight,
+          loadThreshold,
+          estimateSize: estimate,
+          loaded,
+          total: serverTotalRef.current,
+          scrollTop,
+        })
+      ) {
+        loadMoreServerPages()
+      }
+
+      if (needsCheck) {
+        rafId = requestAnimationFrame(runCheck)
+      }
+    }
+
+    const onScroll = () => {
+      needsCheck = true
+      if (rafId == null) {
+        rafId = requestAnimationFrame(runCheck)
+      }
+    }
+
+    scrollElement.addEventListener('scroll', onScroll, { passive: true })
+    rafId = requestAnimationFrame(runCheck)
+
+    return () => {
+      scrollElement.removeEventListener('scroll', onScroll)
+      if (rafId != null) cancelAnimationFrame(rafId)
+    }
+  }, [infiniteScrollConfig?.estimateSize, isServerInfinite, loadMoreServerPages, loadThreshold, scrollAreaRef, normalRows.length, serverTotal])
+
+  const effectiveDisplayRows = isServerInfinite
+    ? sortedRows
+    : wantsFullList
+      ? sortedRows
+      : windowEnabled
+        ? windowRows
+        : displayRows
+
+  const effectiveIsLoadingMore = isServerInfinite
+    ? isFetching && normalRows.length > 0 && (serverTotal === 0 || normalRows.length < serverTotal)
+    : windowEnabled
+      ? windowIsLoadingMore
+      : isLoadingMore
 
   return {
     effectiveDisplayRows,
@@ -217,6 +342,6 @@ export function useInfiniteScrollManager<TData>({
     isVirtualizationEnabled: wantsDomVirtualization,
     isFullListVirtualization: wantsFullList,
     shouldEnableInfiniteScroll:
-      shouldEnableGrowingScroll || wantsWindowed || wantsFullList,
+      isServerInfinite || shouldEnableGrowingScroll || wantsWindowed || wantsFullList,
   }
 }

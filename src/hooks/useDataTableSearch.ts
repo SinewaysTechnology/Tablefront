@@ -1,139 +1,62 @@
-import { useState, useRef, useEffect, useCallback, ChangeEvent, KeyboardEvent } from 'react'
-import type { DataTableProps } from '../types/DataTableTypes'
+import { useRef, useCallback, KeyboardEvent } from 'react'
 
 /**
- * Search and filtering logic hook for DataTable
+ * Search handlers for DataTable. Draft input state lives in DebouncedSearchField
+ * so keystrokes do not re-render the table.
  */
-export function useDataTableSearch<TData>({
-  storeSearchValue,
+export function useDataTableSearch({
   setStoreSearchValue,
   filterProcessor,
   filters,
   clearFilters,
   parentContainerRef,
 }: {
-  storeSearchValue: string
   setStoreSearchValue: (value: string) => void
   filterProcessor: any
   filters: any[]
   clearFilters?: () => void
   parentContainerRef: React.RefObject<HTMLDivElement | null>
 }) {
-  // ============================================================================
-  // SEARCH STATE
-  // ============================================================================
-  
-  const [searchValue, setSearchValue] = useState(storeSearchValue)
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
-  // Reduced debounce for more responsive search
-  const DEBOUNCE_MS = 150
 
-  // ============================================================================
-  // SEARCH SYNC
-  // ============================================================================
-  
-  useEffect(() => {
-    setSearchValue(storeSearchValue)
-  }, [storeSearchValue])
-
-  // ============================================================================
-  // DEBOUNCED SEARCH
-  // ============================================================================
-  
-  const debouncedSetStoreSearchValue = useCallback((value: string) => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current)
-    }
-    
-    debounceTimerRef.current = setTimeout(() => {
-      if (filterProcessor) {
-        setStoreSearchValue(value)
-      }
-      debounceTimerRef.current = null
-    }, DEBOUNCE_MS)
+  const handleSearchCommit = useCallback((value: string) => {
+    if (!filterProcessor) return
+    setStoreSearchValue(value)
   }, [filterProcessor, setStoreSearchValue])
-  
-  useEffect(() => {
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current)
-      }
-    }
-  }, [])
-
-  // ============================================================================
-  // SEARCH HANDLERS
-  // ============================================================================
-  
-  const handleSearchChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    const newValue = e.target.value
-    setSearchValue(newValue)
-    debouncedSetStoreSearchValue(newValue)
-  }, [debouncedSetStoreSearchValue])
 
   const clearSearchValue = useCallback(() => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current)
-      debounceTimerRef.current = null
-    }
-    
-    setSearchValue('')
-    if (filterProcessor) {
-      setStoreSearchValue('')
-    }
+    if (!filterProcessor) return
+    setStoreSearchValue('')
   }, [filterProcessor, setStoreSearchValue])
 
   const handleSearchKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      
-      if (filterProcessor && filters.length > 0) {
-        clearFilters?.()
-        clearSearchValue()
-      } else if (searchValue) {
-        clearSearchValue()
-      }
-      
-      parentContainerRef.current?.focus()
+    if (e.key !== 'Escape') return
+
+    e.preventDefault()
+
+    if (filterProcessor && filters.length > 0) {
+      clearFilters?.()
+      clearSearchValue()
     }
-  }, [filterProcessor, filters, clearFilters, searchValue, clearSearchValue])
+
+    parentContainerRef.current?.focus()
+  }, [filterProcessor, filters, clearFilters, clearSearchValue, parentContainerRef])
 
   const handleClearSearch = useCallback(() => {
     clearSearchValue()
   }, [clearSearchValue])
 
-  const resetSearch = useCallback(() => {
-    clearSearchValue()
-  }, [clearSearchValue])
-  
   const handleClearFilters = useCallback(() => {
     if (filterProcessor && clearFilters) {
       clearFilters()
     }
   }, [filterProcessor, clearFilters])
 
-  // ============================================================================
-  // RETURN SEARCH LOGIC
-  // ============================================================================
-  
   return {
-    // Search state
-    searchValue,
-    setSearchValue,
     searchInputRef,
-    debounceTimerRef,
-    DEBOUNCE_MS,
-    
-    // Search handlers
-    handleSearchChange,
-    clearSearchValue,
+    handleSearchCommit,
     handleSearchKeyDown,
     handleClearSearch,
-    resetSearch,
     handleClearFilters,
-    
-    // Debounced search
-    debouncedSetStoreSearchValue,
   }
 }

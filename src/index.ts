@@ -45,6 +45,12 @@ export {
 } from './fieldBuilder'
 
 export { cn } from './utils'
+export { formatTableResultCount } from './utils/resultCount'
+export {
+  CLIENT_SEARCH_DEBOUNCE_MS,
+  SERVER_SEARCH_DEBOUNCE_MS,
+  resolveSearchDebounceMs,
+} from './utils/searchDebounce'
 export { 
   generateStableStoreId, 
   getFirstField, 
@@ -68,6 +74,8 @@ export type {
   DataTableProps,
   DataTableLayout,
   DataTablePaginationConfig,
+  DataTableServerConfig,
+  DataTableServerQuery,
   InfiniteScrollConfig,
   
   // Column and field types

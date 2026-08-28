@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect } from 'react'
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import { useReactTable, getCoreRowModel, getSortedRowModel, getPaginationRowModel, Row } from '@tanstack/react-table'
 import { ColumnDef } from '@tanstack/react-table'
 import { createEntityTableStore } from '../stores/createTableStore'
@@ -41,6 +41,7 @@ export function useDataTableState<TData>({
   enableColumnResize = true,
   customStaticRows = [],
   customStaticRowsSticky = true,
+  server,
 }: Pick<DataTableProps<TData>, 
   | 'data'
   | 'columns'
@@ -58,14 +59,20 @@ export function useDataTableState<TData>({
   | 'enableColumnResize'
   | 'customStaticRows'
   | 'customStaticRowsSticky'
+  | 'server'
 >) {
   // ============================================================================
   // CORE IDENTIFIERS AND STORES
   // ============================================================================
   
+  const lastIdFieldRef = useRef<keyof TData | null>(null)
   const idField = useMemo(() => {
     const firstField = getFirstField(data)
-    return firstField || ('id' as keyof TData)
+    if (firstField) {
+      lastIdFieldRef.current = firstField
+      return firstField
+    }
+    return lastIdFieldRef.current || ('id' as keyof TData)
   }, [data]) as keyof TData
 
   const stableStoreId = useMemo(() => 
@@ -77,8 +84,15 @@ export function useDataTableState<TData>({
   // PAGINATION STATE
   // ============================================================================
   
-  const isUsingPagination = !!paginationConfig
-  const effectivePageSize = paginationConfig?.pageSize ?? infiniteScrollConfig?.pageSize ?? STANDARD_PAGE_SIZE
+  const isServerMode = Boolean(server && server.enabled !== false)
+  const isServerInfinite = isServerMode && !!infiniteScrollConfig?.enabled
+  const isUsingPagination = isServerInfinite ? false : (isServerMode || !!paginationConfig)
+  const configuredPageSize = paginationConfig?.pageSize ?? infiniteScrollConfig?.pageSize ?? STANDARD_PAGE_SIZE
+  const normalizedPageSize = Number.isFinite(configuredPageSize) ? Math.floor(configuredPageSize) : 0
+  const effectivePageSize = normalizedPageSize > 0 ? normalizedPageSize : STANDARD_PAGE_SIZE
+  const serverMatchCount = isServerMode && typeof server?.total === 'number' && Number.isFinite(server.total)
+    ? Math.max(0, Math.floor(server.total))
+    : 0
   
   const tableStore = useMemo(() => 
     createEntityTableStore(stableStoreId, { 
@@ -157,31 +171,41 @@ export function useDataTableState<TData>({
     return labels
   }, [columns, columnOverrides])
 
+  const filterSampleRef = useRef(data)
+  if (data.length > 0) {
+    filterSampleRef.current = data
+  }
+  const hasFilterSample = filterSampleRef.current.length > 0
+
   const filterStore = useMemo(() => {
-    const hasData = data.length > 0
-    
-    if (!hasData) {
-      return createEntityFilterStore(`${stableStoreId}-empty`, [], [])
-    }
-    
     const effectiveFieldOverrides = fieldOverrides || {}
-    
     const { filters: autoFilters, searches: autoSearches } = buildFields(
-      data, 
-      effectiveFieldOverrides, 
-      { idField, fieldLabels: columnFieldLabels }
+      filterSampleRef.current,
+      effectiveFieldOverrides,
+      { idField, fieldLabels: columnFieldLabels },
     )
-    
+
     return createEntityFilterStore(`${stableStoreId}-filters`, autoFilters, autoSearches)
-  }, [fieldOverrides, data, idField, stableStoreId, columnFieldLabels])
+  }, [fieldOverrides, idField, stableStoreId, columnFieldLabels, hasFilterSample])
 
   const {
     filters,
     clearFilters,
     searchValue: storeSearchValue,
-    setSearchValue: setStoreSearchValue,
+    setSearchValue: setStoreSearchValueRaw,
     filterProcessor
   } = filterStore()
+
+  const resetServerPage = useCallback(() => {
+    setPagination((current) =>
+      current.pageIndex === 0 ? current : { ...current, pageIndex: 0 },
+    )
+  }, [setPagination])
+
+  const setStoreSearchValue = useCallback((value: string) => {
+    setStoreSearchValueRaw(value)
+    if (isServerMode) resetServerPage()
+  }, [isServerMode, resetServerPage, setStoreSearchValueRaw])
 
   // ============================================================================
   // COLUMN STATE
@@ -300,9 +324,10 @@ export function useDataTableState<TData>({
   // model by the store. Apply it once so custom paths, multi-word search, and
   // column filters always use identical semantics.
   const filteredData = useMemo(() => {
+    if (isServerMode) return data
     if (!data.length || !filterProcessor) return data
     return filters.length > 0 ? filterProcessor.applyFilters(data, filters) : data
-  }, [data, filters, filterProcessor])
+  }, [data, filters, filterProcessor, isServerMode])
 
   // All rows are normal rows now (custom static rows are handled separately)
   const normalRows = filteredData
@@ -321,6 +346,10 @@ export function useDataTableState<TData>({
       return effectiveColumns.map(col => col.id || String(((col as { accessorKey?: string })?.accessorKey) || ''))
     }
   }, [enableColumnDrag, columnOrder, effectiveColumns])
+
+  const serverPageCount = isServerMode
+    ? Math.max(1, Math.ceil(serverMatchCount / effectivePageSize))
+    : undefined
 
   const table = useReactTable({
     data: normalRows,
@@ -346,6 +375,12 @@ export function useDataTableState<TData>({
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    manualPagination: isServerMode,
+    manualSorting: isServerMode,
+    manualFiltering: isServerMode,
+    sortDescFirst: isServerMode,
+    rowCount: isServerMode ? serverMatchCount : undefined,
+    pageCount: serverPageCount,
     getRowId: row => String(row[idField]),
     debugTable: false,
   })
@@ -353,8 +388,9 @@ export function useDataTableState<TData>({
   const { rows } = table.getPaginationRowModel()
 
   const displayRows = useMemo(() => {
+    if (isServerInfinite) return normalRows
     return rows.map((row: Row<TData>) => row.original)
-  }, [rows])
+  }, [isServerInfinite, normalRows, rows])
 
   // ============================================================================
   // RESIZE STATE
@@ -424,6 +460,43 @@ export function useDataTableState<TData>({
     }
   }, [])
 
+  const onQueryChangeRef = useRef(server?.onQueryChange)
+  onQueryChangeRef.current = server?.onQueryChange
+  const lastServerQueryKeyRef = useRef('')
+  const lastEmittedSearchRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!isServerMode) {
+      lastServerQueryKeyRef.current = ''
+      lastEmittedSearchRef.current = null
+      return
+    }
+    const emit = onQueryChangeRef.current
+    if (!emit) return
+
+    let pageIndex = pagination.pageIndex || 0
+    if (lastEmittedSearchRef.current !== null && lastEmittedSearchRef.current !== storeSearchValue) {
+      if (pageIndex !== 0) {
+        pageIndex = 0
+        resetServerPage()
+      }
+    }
+    lastEmittedSearchRef.current = storeSearchValue
+
+    const sort = sorting[0]
+    const query = {
+      q: storeSearchValue,
+      sort: sort?.id ?? null,
+      order: sort && sort.desc === false ? 'asc' as const : 'desc' as const,
+      pageIndex,
+      pageSize: effectivePageSize,
+    }
+    const key = JSON.stringify(query)
+    if (key === lastServerQueryKeyRef.current) return
+    lastServerQueryKeyRef.current = key
+    emit(query)
+  }, [effectivePageSize, isServerMode, pagination.pageIndex, resetServerPage, sorting, storeSearchValue])
+
   // ============================================================================
   // RETURN STATE
   // ============================================================================
@@ -442,6 +515,10 @@ export function useDataTableState<TData>({
     
     // Pagination
     isUsingPagination,
+    isServerMode,
+    isServerInfinite,
+    serverTotal: isServerMode ? serverMatchCount : undefined,
+    serverIsFetching: Boolean(server?.isFetching),
     effectivePageSize,
     pagination,
     

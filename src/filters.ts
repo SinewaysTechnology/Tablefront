@@ -387,7 +387,8 @@ export class FilterProcessor {
             value = String(filter.value)
         }
 
-        const preferredAlias = fieldDef.aliases?.[0] || fieldDef.id
+        const preferredAlias =
+          fieldDef.aliases?.find((alias) => /^[a-zA-Z0-9._-]+$/.test(alias)) || fieldDef.id
         return `${quoteFieldIdentifier(preferredAlias)}:${operator}${quoteFilterValue(value)}`
     }
     
