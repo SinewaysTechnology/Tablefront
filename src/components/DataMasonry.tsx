@@ -4,6 +4,7 @@ import React, { useCallback, useRef, useEffect, useState, useMemo } from 'react'
 import { flexRender } from '@tanstack/react-table'
 import { cn } from '../utils'
 import type { DataTableIcons } from '../types/DataTableTypes'
+import { shouldShowLoadingMoreIndicator } from '../utils/tableContentStatus'
 
 /**
  * Props for the DataMasonry component
@@ -43,6 +44,8 @@ export interface DataMasonryProps<TData> {
   // Infinite scroll
   isLoadingMore: boolean
   isLoadingLess?: boolean
+  isRefreshing?: boolean
+  loadingMoreText?: string
   shouldEnableInfiniteScroll: boolean
   
   // Styling
@@ -103,6 +106,8 @@ export function DataMasonry<TData>({
   customStaticRowsSticky = true,
   isLoadingMore,
   isLoadingLess,
+  isRefreshing = false,
+  loadingMoreText = 'Loading...',
   shouldEnableInfiniteScroll,
   tableStyles,
   icons
@@ -442,14 +447,23 @@ export function DataMasonry<TData>({
       </div>
       
       {/* Loading indicator for infinite scroll in masonry mode */}
-      {(isLoadingMore || isLoadingLess) && shouldEnableInfiniteScroll && (
+      {(shouldShowLoadingMoreIndicator({
+        isLoadingMore,
+        isRefreshing,
+        rowCount: displayRows.length,
+      }) || (Boolean(isLoadingLess) && !isRefreshing)) && shouldEnableInfiniteScroll && (
         <div className="flex justify-center items-center py-4">
-          <div className="flex items-center gap-2 text-muted-foreground">
+          <div
+            className="flex items-center gap-2 text-muted-foreground"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
             {icons.Loader && (
               <icons.Loader className="h-4 w-4 animate-spin" />
             )}
             <span className="text-sm">
-              {isLoadingLess ? 'Loading previous items...' : 'Loading more items...'}
+              {isLoadingLess ? 'Loading previous items...' : loadingMoreText}
             </span>
           </div>
         </div>

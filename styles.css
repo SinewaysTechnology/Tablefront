@@ -101,6 +101,9 @@
   [data-tablefront-root] .z-50 {
     z-index: 50;
   }
+  [data-tablefront-root] .z-\[1\] {
+    z-index: 1;
+  }
   [data-tablefront-root] .z-\[9999\] {
     z-index: 9999;
   }
@@ -379,6 +382,9 @@
   }
   [data-tablefront-root] .cursor-pointer {
     cursor: pointer;
+  }
+  [data-tablefront-root] .cursor-text {
+    cursor: text;
   }
   [data-tablefront-root] .resize {
     resize: both;
@@ -1020,6 +1026,9 @@
   [data-tablefront-root] .opacity-50 {
     opacity: 50%;
   }
+  [data-tablefront-root] .opacity-60 {
+    opacity: 60%;
+  }
   [data-tablefront-root] .opacity-80 {
     opacity: 80%;
   }
@@ -1121,6 +1130,11 @@
   }
   [data-tablefront-root] .transition-colors {
     transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
+    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--default-transition-duration));
+  }
+  [data-tablefront-root] .transition-opacity {
+    transition-property: opacity;
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
@@ -1688,6 +1702,11 @@
       --tw-enter-scale: .95;
     }
   }
+  [data-tablefront-root] .motion-reduce\:transition-none {
+    @media (prefers-reduced-motion: reduce) {
+      transition-property: none;
+    }
+  }
   [data-tablefront-root] .sm\:grid-cols-2 {
     @media (width >= 40rem) {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1737,6 +1756,9 @@
 }
 [data-tablefront-root] [data-tf-column-dragging] [data-tablefront-resize-handle] {
   pointer-events: none;
+}
+[data-tablefront-root] input[type="text"] {
+  cursor: text;
 }
 @keyframes enter {
   from {

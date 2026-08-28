@@ -77,3 +77,8 @@
 [data-tf-column-dragging] [data-tablefront-resize-handle] {
   pointer-events: none;
 }
+
+/* I-beam over the whole search field, including padding and icon gutter. */
+[data-tablefront-root] input[type="text"] {
+  cursor: text;
+}

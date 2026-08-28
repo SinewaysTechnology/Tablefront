@@ -53,7 +53,12 @@ export function DataTableStates({
   // Show loading state
   if (showLoadingState || isLoading) {
     return (
-      <div className={tableStyles.loadingState.container}>
+      <div
+        className={tableStyles.loadingState.container}
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
         <div className={tableStyles.loadingState.content}>
           <div className="flex items-center justify-center">
             {icons.Loader && <icons.Loader className={tableStyles.loadingState.icon} />}
@@ -91,7 +96,12 @@ export function LoadingState({
   icons: DataTableIcons
 }) {
   return (
-    <div className={tableStyles.loadingState.container}>
+    <div
+      className={tableStyles.loadingState.container}
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
       <div className={tableStyles.loadingState.content}>
         <div className="flex items-center justify-center">
           {icons.Loader && <icons.Loader className={tableStyles.loadingState.icon} />}

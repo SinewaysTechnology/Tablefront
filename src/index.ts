@@ -60,6 +60,7 @@ export {
 } from './utils/tableUtils'
 
 export { DEFAULT_RESIZE_DOUBLE_CLICK_DELAY, DEFAULT_RESIZE_RESET_DEBOUNCE } from './constants/resize'
+export { CONTENT_LOADING_DELAY_MS, ROW_REFRESHING_DELAY_MS } from './constants/loading'
 
 // Licensing — side-effect import is injected into dist entry (see tsup.config.ts).
 // `tablefront activate` overwrites dist/license.globals.* with validated tokens.

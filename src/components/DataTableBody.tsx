@@ -5,6 +5,7 @@ import { flexRender } from '@tanstack/react-table'
 import { cn } from '../utils'
 import type { DataTableIcons } from '../types/DataTableTypes'
 import type { DataTableVirtualizer } from '../hooks/useDataTableVirtualizer'
+import { shouldShowLoadingMoreIndicator } from '../utils/tableContentStatus'
 
 /**
  * Props for the DataTableBody component
@@ -40,6 +41,7 @@ export interface DataTableBodyProps<TData> {
       tableRowHover: string
       tableRowSelected: string
       tableCell: string
+      tableBodyRefreshing?: string
       expandButton: string
     }
   }
@@ -56,6 +58,12 @@ export interface DataTableBodyProps<TData> {
   /** TanStack row virtualizer — when set, only visible rows are mounted. */
   rowVirtualizer?: DataTableVirtualizer | null
   isVirtualized?: boolean
+
+  /** Dim existing rows while a sort/search/filter replace is in flight. */
+  isRefreshing?: boolean
+  /** Instant extra row while the next infinite-scroll page is requested. */
+  isLoadingMore?: boolean
+  loadingMoreText?: string
 }
 
 /**
@@ -82,6 +90,9 @@ export function DataTableBody<TData>({
   scrollAreaRef,
   rowVirtualizer = null,
   isVirtualized = false,
+  isRefreshing = false,
+  isLoadingMore = false,
+  loadingMoreText = 'Loading...',
 }: DataTableBodyProps<TData>) {
   const [headerHeight, setHeaderHeight] = useState(40)
   const [headerHasBorder, setHeaderHasBorder] = useState(false)
@@ -261,8 +272,50 @@ export function DataTableBody<TData>({
       ? rowVirtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
       : 0
 
+  const showLoadingMoreRow = shouldShowLoadingMoreIndicator({
+    isLoadingMore,
+    isRefreshing,
+    rowCount: displayRows.length,
+  })
+
+  const loadingMoreRow = showLoadingMoreRow ? (
+    <tr
+      data-tablefront-loading-more="true"
+      className={cn(tableStyles.table.tableRow, 'pointer-events-none')}
+    >
+      <td
+        colSpan={columnCount}
+        className={cn(tableStyles.table.tableCell, 'text-muted-foreground')}
+      >
+        <div
+          className="flex items-center gap-2"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          style={
+            clampStaticRowsToContainer
+              ? {
+                  position: 'sticky',
+                  left: 0,
+                  width: containerWidth ? `${containerWidth}px` : undefined,
+                  maxWidth: '100%',
+                }
+              : undefined
+          }
+        >
+          {icons.Loader && <icons.Loader className="h-4 w-4 animate-spin" />}
+          <span>{loadingMoreText}</span>
+        </div>
+      </td>
+    </tr>
+  ) : null
+
   return (
-    <tbody ref={tbodyRef}>
+    <tbody
+      ref={tbodyRef}
+      aria-busy={isRefreshing || showLoadingMoreRow || undefined}
+      className={cn(isRefreshing && tableStyles.table.tableBodyRefreshing)}
+    >
       {/* Custom static rows */}
       {customStaticRows.map((staticRow, index) => (
         <tr
@@ -337,9 +390,13 @@ export function DataTableBody<TData>({
               />
             </tr>
           )}
+          {loadingMoreRow}
         </>
       ) : (
-        displayRows.map((rowData, index) => renderDataRow(rowData, index))
+        <>
+          {displayRows.map((rowData, index) => renderDataRow(rowData, index))}
+          {loadingMoreRow}
+        </>
       )}
     </tbody>
   )

@@ -37,3 +37,42 @@ export const shouldPrefetchNextServerPage = ({
 
   return distanceFromBottom < serverInfinitePrefetchDistance(loadThreshold, clientHeight)
 }
+
+/** True while a later infinite-scroll page is in flight, not a sort/search replace. */
+export const isServerLoadingMore = ({
+  isFetching,
+  pageIndex,
+  loadedCount,
+  serverTotal,
+}: {
+  isFetching: boolean
+  pageIndex: number
+  loadedCount: number
+  serverTotal: number
+}): boolean =>
+  Boolean(isFetching) &&
+  pageIndex > 0 &&
+  loadedCount > 0 &&
+  (serverTotal === 0 || loadedCount < serverTotal)
+
+/** Include the local request lock so the loading-more row appears immediately. */
+export const isServerLoadingMoreVisible = ({
+  requestedMore,
+  isFetching,
+  pageIndex,
+  loadedCount,
+  serverTotal,
+}: {
+  requestedMore: boolean
+  isFetching: boolean
+  pageIndex: number
+  loadedCount: number
+  serverTotal: number
+}): boolean =>
+  (Boolean(requestedMore) && pageIndex > 0) ||
+  isServerLoadingMore({
+    isFetching,
+    pageIndex,
+    loadedCount,
+    serverTotal,
+  })

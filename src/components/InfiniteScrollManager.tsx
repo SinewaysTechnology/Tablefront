@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { PaginationState } from '@tanstack/react-table'
 import { INFINITE_SCROLL_INCREMENT, SCROLL_THRESHOLD, STANDARD_PAGE_SIZE } from '../constants/pagination'
 import { getScrollElement } from '../utils/scrollElement'
-import { resolveEstimateSize, shouldPrefetchNextServerPage } from '../utils/serverInfiniteScroll'
+import { isServerLoadingMoreVisible, resolveEstimateSize, shouldPrefetchNextServerPage } from '../utils/serverInfiniteScroll'
 import { useWindowedRows } from '../hooks/useWindowedRows'
 
 import type { InfiniteScrollConfig } from '../types/DataTableTypes'
@@ -266,6 +266,7 @@ export function useInfiniteScrollManager<TData>({
     if ((pagination.pageIndex || 0) !== 0) return
     loadingLockRef.current = false
     loadedAtRequestRef.current = 0
+    setIsLoadingMore(false)
   }, [isServerInfinite, pagination.pageIndex])
 
   useEffect(() => {
@@ -330,7 +331,13 @@ export function useInfiniteScrollManager<TData>({
         : displayRows
 
   const effectiveIsLoadingMore = isServerInfinite
-    ? isFetching && normalRows.length > 0 && (serverTotal === 0 || normalRows.length < serverTotal)
+    ? isServerLoadingMoreVisible({
+        requestedMore: isLoadingMore,
+        isFetching,
+        pageIndex: pagination.pageIndex || 0,
+        loadedCount: normalRows.length,
+        serverTotal,
+      })
     : windowEnabled
       ? windowIsLoadingMore
       : isLoadingMore

@@ -38,6 +38,7 @@ export interface TableStyles {
     tableRowHover: string
     tableCell: string
     tableHeaderCell: string
+    tableBodyRefreshing: string
     expandHeader: string
     expandButton: string
   }
@@ -174,6 +175,7 @@ const baseStyles: TableStyles = {
     tableRowHover: "",
     tableCell: "",
     tableHeaderCell: "",
+    tableBodyRefreshing: "",
     expandHeader: "",
     expandButton: ""
   },

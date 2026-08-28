@@ -46,6 +46,15 @@ import { useDataTableSearch } from './hooks/useDataTableSearch'
 import { resolveSearchDebounceMs } from './utils/searchDebounce'
 import { useInfiniteScrollManager } from './components/InfiniteScrollManager';
 import { useDataTableVirtualizer } from './hooks/useDataTableVirtualizer';
+import { useDelayedFlag } from './hooks/useDelayedFlag'
+import { useStaleDisplayedRows } from './hooks/useStaleDisplayedRows'
+import { CONTENT_LOADING_DELAY_MS, ROW_REFRESHING_DELAY_MS } from './constants/loading'
+import {
+  buildDisplayedRowsFingerprint,
+  isReplacingTableContent,
+  isTableBodyRefreshing,
+  resolveTableContentStatus,
+} from './utils/tableContentStatus'
 
 // Import only the types actually used in this component
 import type {
@@ -449,14 +458,8 @@ export function DataTable<TData>({
 
   const listResetKey = useMemo(() => {
     const sortingKey = JSON.stringify(table.getState().sorting)
-    const mid = sortedRows[Math.floor(sortedRows.length / 2)] as TData | undefined
-    const first = sortedRows[0] as TData | undefined
-    const last = sortedRows[sortedRows.length - 1] as TData | undefined
     return [
-      sortedRows.length,
-      String(first?.[idField] ?? ''),
-      String(mid?.[idField] ?? ''),
-      String(last?.[idField] ?? ''),
+      buildDisplayedRowsFingerprint({ rows: sortedRows, idField }),
       sortingKey,
       storeSearchValue,
       filters.length,
@@ -485,6 +488,40 @@ export function DataTable<TData>({
     displayMode,
     windowSize,
     listResetKey,
+  })
+
+  const isContentBusy = Boolean(isLoading || serverIsFetching)
+  const isAppendingMore = Boolean(effectiveIsLoadingMore)
+  const isReplacingContent = isReplacingTableContent({
+    isBusy: isContentBusy,
+    isAppending: isAppendingMore,
+  })
+  const showDelayedLoading = useDelayedFlag(
+    isReplacingContent && effectiveDisplayRows.length === 0,
+    CONTENT_LOADING_DELAY_MS,
+  )
+  const replaceQueryKey = [
+    JSON.stringify(table.getState().sorting),
+    storeSearchValue,
+    JSON.stringify(filters),
+  ].join('|')
+  const displayedRowsFingerprint = buildDisplayedRowsFingerprint({
+    rows: effectiveDisplayRows,
+    idField,
+  })
+  const isStaleDisplayedRows = useStaleDisplayedRows(replaceQueryKey, displayedRowsFingerprint)
+  const isRefreshingRows = useDelayedFlag(
+    isTableBodyRefreshing({
+      rowCount: effectiveDisplayRows.length,
+      isReplacing: isReplacingContent,
+      isStale: isStaleDisplayedRows,
+    }),
+    ROW_REFRESHING_DELAY_MS,
+  )
+  const tableContentStatus = resolveTableContentStatus({
+    rowCount: effectiveDisplayRows.length,
+    isReplacing: isReplacingContent,
+    showDelayedLoading,
   })
 
   const [virtualScrollMargin, setVirtualScrollMargin] = useState(0)
@@ -559,6 +596,8 @@ export function DataTable<TData>({
       searchInputRef.current?.focus();
       return;
     }
+
+    if (isRefreshingRows) return
     
     const currentSelectedIndex = selectedId !== null 
       ? effectiveDisplayRows.findIndex(row => String(row[idField]) === String(selectedId))
@@ -737,7 +776,7 @@ export function DataTable<TData>({
         })
       }
     }
-      }, [effectiveDisplayRows, onRowClick, selectedId, idField, scrollAreaRef, expandable, effectiveExpandedRows, onToggleExpand, onExpansionChange, internalExpandedRows, isUsingPagination, table, scrollToTop, scrollToBottom, highlightIndex, isVirtualizationEnabled, displayMode, rowVirtualizer]);
+      }, [effectiveDisplayRows, onRowClick, selectedId, idField, scrollAreaRef, expandable, effectiveExpandedRows, onToggleExpand, onExpansionChange, internalExpandedRows, isUsingPagination, table, scrollToTop, scrollToBottom, highlightIndex, isVirtualizationEnabled, displayMode, rowVirtualizer, isRefreshingRows]);
 
   useEffect(() => {
     return () => {
@@ -745,6 +784,19 @@ export function DataTable<TData>({
       if (navRafRef.current) window.cancelAnimationFrame(navRafRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (!isRefreshingRows) return
+    if (promoteTimerRef.current) {
+      window.clearTimeout(promoteTimerRef.current)
+      promoteTimerRef.current = null
+    }
+    if (navRafRef.current) {
+      window.cancelAnimationFrame(navRafRef.current)
+      navRafRef.current = null
+    }
+    pendingIndexRef.current = null
+  }, [isRefreshingRows])
 
   const scrollToRow = useCallback((targetRow: HTMLElement, viewport: HTMLElement) => {
     if (!targetRow || !viewport) return
@@ -785,6 +837,8 @@ export function DataTable<TData>({
   }, [scrollAreaRef, customStaticRowsSticky, customStaticRows?.length]);
 
   const handleRowClick = useCallback((row: TData) => {
+    if (isRefreshingRows) return
+
     setRecentManualSelection(true);
     
     if (manualSelectionTimeoutRef.current) {
@@ -801,7 +855,7 @@ export function DataTable<TData>({
       setHighlightedId(row[idField])
     }
     onRowClick(row);
-  }, [onRowClick, effectiveDisplayRows, idField]);
+  }, [onRowClick, effectiveDisplayRows, idField, isRefreshingRows]);
 
   // ============================================================================
   // DRAG AND DROP OPTIMIZATION HELPERS
@@ -1378,7 +1432,18 @@ export function DataTable<TData>({
     );
   }, [enableColumnResize, resizeState.isResizing]);
 
-  
+  const contentStatesElement =
+    tableContentStatus === 'loading' || tableContentStatus === 'empty' ? (
+      <DataTableStates
+        showLoadingState={tableContentStatus === 'loading'}
+        showEmptyState={tableContentStatus === 'empty'}
+        isLoading={tableContentStatus === 'loading'}
+        loadingText={loadingText}
+        emptyStateText={emptyStateText}
+        tableStyles={tableStyles}
+        icons={effectiveIcons}
+      />
+    ) : null
 
   return (
     <div data-tablefront-root className="flex h-full min-h-0 w-full flex-1 flex-col">
@@ -1391,6 +1456,7 @@ export function DataTable<TData>({
         onDragOver={enableColumnDrag ? handleDragOver : undefined}
         onDrop={enableColumnDrag ? handleDrop : undefined}
         aria-label="Data table with keyboard navigation"
+        aria-busy={isReplacingContent || undefined}
         role="grid"
       >
       <LicenseEnforcer containerRef={parentContainerRef} />
@@ -1434,7 +1500,11 @@ export function DataTable<TData>({
         {(displayMode === 'grid' || displayMode === 'masonry') && null}
         {displayMode === 'grid' ? (
           <>
-            <DataGrid
+            <div
+              className={cn(isRefreshingRows && tableStyles.table.tableBodyRefreshing)}
+              aria-busy={isRefreshingRows || undefined}
+            >
+              <DataGrid
               displayRows={effectiveDisplayRows}
               displayMode={displayMode}
               idField={idField}
@@ -1456,6 +1526,8 @@ export function DataTable<TData>({
               customStaticRowsSticky={customStaticRowsSticky}
               isLoadingMore={effectiveIsLoadingMore}
               isLoadingLess={isLoadingLess}
+              isRefreshing={isRefreshingRows}
+              loadingMoreText={labels?.loadingMore ?? loadingText}
               shouldEnableInfiniteScroll={shouldEnableInfiniteScroll}
               isVirtualized={isVirtualizationEnabled}
               scrollAreaRef={scrollAreaRef}
@@ -1463,22 +1535,17 @@ export function DataTable<TData>({
               overscan={infiniteScrollConfig?.overscan}
               tableStyles={tableStyles}
               icons={effectiveIcons}
-            />
-            {effectiveDisplayRows.length === 0 && !isLoading && (
-              <DataTableStates
-                showLoadingState={false}
-                showEmptyState={true}
-                isLoading={isLoading}
-                loadingText={loadingText}
-                emptyStateText={emptyStateText}
-                tableStyles={tableStyles}
-                icons={effectiveIcons}
               />
-            )}
+            </div>
+            {contentStatesElement}
           </>
         ) : displayMode === 'masonry' ? (
           <>
-            <DataMasonry
+            <div
+              className={cn(isRefreshingRows && tableStyles.table.tableBodyRefreshing)}
+              aria-busy={isRefreshingRows || undefined}
+            >
+              <DataMasonry
               displayRows={effectiveDisplayRows}
               displayMode={displayMode}
               idField={idField}
@@ -1500,21 +1567,14 @@ export function DataTable<TData>({
               customStaticRowsSticky={customStaticRowsSticky}
               isLoadingMore={effectiveIsLoadingMore}
               isLoadingLess={isLoadingLess}
+              isRefreshing={isRefreshingRows}
+              loadingMoreText={labels?.loadingMore ?? loadingText}
               shouldEnableInfiniteScroll={shouldEnableInfiniteScroll}
               tableStyles={tableStyles}
               icons={effectiveIcons}
-            />
-            {effectiveDisplayRows.length === 0 && !isLoading && (
-              <DataTableStates
-                showLoadingState={false}
-                showEmptyState={true}
-                isLoading={isLoading}
-                loadingText={loadingText}
-                emptyStateText={emptyStateText}
-                tableStyles={tableStyles}
-                icons={effectiveIcons}
               />
-            )}
+            </div>
+            {contentStatesElement}
           </>
         ) : (
             <>
@@ -1730,19 +1790,12 @@ export function DataTable<TData>({
                   scrollAreaRef={scrollAreaRef}
                   rowVirtualizer={rowVirtualizer}
                   isVirtualized={isVirtualizationEnabled && displayMode === 'table'}
+                  isRefreshing={isRefreshingRows}
+                  isLoadingMore={effectiveIsLoadingMore}
+                  loadingMoreText={labels?.loadingMore ?? loadingText}
                 />
               </table>
-              {effectiveDisplayRows.length === 0 && !isLoading && (
-                <DataTableStates
-                  showLoadingState={false}
-                  showEmptyState={true}
-                  isLoading={isLoading}
-                  loadingText={loadingText}
-                  emptyStateText={emptyStateText}
-                  tableStyles={tableStyles}
-                  icons={effectiveIcons}
-                />
-              )}
+              {contentStatesElement}
             </>
         )}
       </ScrollAreaComponent>

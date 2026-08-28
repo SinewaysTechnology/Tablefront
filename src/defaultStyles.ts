@@ -7,10 +7,10 @@ export const defaultTableStyles: PartialTableStyles = {
   searchBar: {
     wrapper: "px-0 pt-0 mb-2",
     containerWrapper: "relative",
-    container: "pr-1.5 relative flex items-center w-full h-12 rounded-lg bg-foreground/5 hover:bg-foreground/10 focus-within:ring-1 focus-within:ring-primary transition-colors",
-    icon: "absolute left-3 w-5 h-5 text-muted-foreground",
-    input: "w-full bg-transparent border-none focus:outline-none text-sm pl-10 pr-2 py-1.5 placeholder:text-muted-foreground",
-    clearButton: "",
+    container: "pr-1.5 relative flex cursor-text items-center w-full h-12 rounded-lg bg-foreground/5 hover:bg-foreground/10 focus-within:ring-1 focus-within:ring-primary transition-colors",
+    icon: "pointer-events-none absolute left-3 w-5 h-5 text-muted-foreground",
+    input: "min-w-0 h-full flex-1 cursor-text bg-transparent border-none focus:outline-none text-sm pl-10 pr-2 placeholder:text-muted-foreground",
+    clearButton: "relative z-[1] shrink-0 cursor-pointer",
     clearButtonIcon: "w-4 h-4"
   },
   
@@ -32,6 +32,7 @@ export const defaultTableStyles: PartialTableStyles = {
     tableRowHover: "hover:bg-foreground/5",
     tableCell: "px-4 align-middle",
     tableHeaderCell: "h-10 px-4 font-medium text-muted-foreground cursor-pointer select-none hover:bg-foreground/5",
+    tableBodyRefreshing: "opacity-60 pointer-events-none transition-opacity duration-200 motion-reduce:transition-none",
     expandHeader: "min-w-10 w-10 px-0 text-center",
     expandButton: "size-1 px-0"
   },
@@ -136,10 +137,10 @@ export const modernTableStyles: PartialTableStyles = {
   searchBar: {
     wrapper: "px-0 pt-0 mb-1",
     containerWrapper: "relative",
-    container: "relative flex items-center w-full h-12 rounded-xl bg-gradient-to-r from-card to-card/80 hover:from-accent/5 hover:to-accent/10 focus-within:ring-2 focus-within:ring-primary transition-all duration-300 shadow-inner border border-border/50",
-    icon: "absolute left-3 w-5 h-5 text-primary",
-    input: "w-full bg-transparent border-none focus:outline-none text-sm pl-10 pr-4 py-1.5 placeholder:text-muted-foreground transition-all duration-200",
-    clearButton: "absolute right-2",
+    container: "relative flex cursor-text items-center w-full h-12 rounded-xl bg-gradient-to-r from-card to-card/80 hover:from-accent/5 hover:to-accent/10 focus-within:ring-2 focus-within:ring-primary transition-all duration-300 shadow-inner border border-border/50",
+    icon: "pointer-events-none absolute left-3 w-5 h-5 text-primary",
+    input: "min-w-0 h-full flex-1 cursor-text bg-transparent border-none focus:outline-none text-sm pl-10 pr-4 placeholder:text-muted-foreground",
+    clearButton: "absolute right-2 z-[1] shrink-0 cursor-pointer",
     clearButtonIcon: "w-4 h-4"
   },
   
@@ -161,6 +162,7 @@ export const modernTableStyles: PartialTableStyles = {
     tableRowHover: "hover:bg-gradient-to-r hover:from-accent/40 hover:via-accent/60 hover:to-accent/40",
     tableCell: "p-4 align-middle",
     tableHeaderCell: "h-12 px-4 text-left align-middle font-semibold text-card-foreground cursor-pointer select-none hover:bg-gradient-to-r hover:from-accent/40 hover:via-accent/60 hover:to-accent/40 transition-colors duration-200",
+    tableBodyRefreshing: "opacity-60 pointer-events-none transition-opacity duration-200 motion-reduce:transition-none",
     expandHeader: "w-10 px-0 text-center",
     expandButton: "w-10 px-0"
   },
@@ -264,10 +266,10 @@ export const compactTableStyles: PartialTableStyles = {
   searchBar: {
     wrapper: "px-0 pt-0 mb-1",
     containerWrapper: "relative",
-    container: "relative flex items-center w-full h-8 rounded bg-muted hover:bg-accent focus-within:ring-1 focus-within:ring-primary transition-colors",
-    icon: "absolute left-2 w-3.5 h-3.5 text-muted-foreground",
-    input: "w-full bg-transparent border-none focus:outline-none text-xs pl-7 pr-3 py-1 placeholder:text-muted-foreground",
-    clearButton: "absolute right-1",
+    container: "relative flex cursor-text items-center w-full h-8 rounded bg-muted hover:bg-accent focus-within:ring-1 focus-within:ring-primary transition-colors",
+    icon: "pointer-events-none absolute left-2 w-3.5 h-3.5 text-muted-foreground",
+    input: "min-w-0 h-full flex-1 cursor-text bg-transparent border-none focus:outline-none text-xs pl-7 pr-3 placeholder:text-muted-foreground",
+    clearButton: "absolute right-1 z-[1] shrink-0 cursor-pointer",
     clearButtonIcon: "w-3 h-3"
   },
   
@@ -289,6 +291,7 @@ export const compactTableStyles: PartialTableStyles = {
     tableRowHover: "hover:bg-muted/30",
     tableCell: "p-2 align-middle text-xs",
     tableHeaderCell: "h-8 px-2 text-left align-middle font-medium text-muted-foreground cursor-pointer select-none hover:bg-muted/50 text-xs",
+    tableBodyRefreshing: "opacity-60 pointer-events-none transition-opacity duration-200 motion-reduce:transition-none",
     expandHeader: "w-6 px-0 text-center",
     expandButton: "w-6 px-0"
   },

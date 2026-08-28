@@ -7,6 +7,7 @@ import type {
   DataTableIcons, 
   DataTableUIComponents
 } from '../types/DataTableTypes'
+import { cn } from '../utils'
 import { formatTableResultCount } from '../utils/resultCount'
 
 /**
@@ -150,10 +151,10 @@ export const DataTableHeader = React.memo(<TData,>({
     return (
       <div className={tableStyles.searchBar.wrapper}>
         <div className={tableStyles.searchBar.containerWrapper}>
-          <div className={tableStyles.searchBar.container}>
+          <div className={cn(tableStyles.searchBar.container, 'cursor-text')}>
             {icons.Search && (
               <icons.Search 
-                className={tableStyles.searchBar.icon}
+                className={cn(tableStyles.searchBar.icon, 'pointer-events-none')}
               />
             )}
             
@@ -165,10 +166,10 @@ export const DataTableHeader = React.memo(<TData,>({
               onKeyDown={onSearchKeyDown}
               placeholder={searchPlaceholder}
               inputRef={searchInputRef}
-              className={tableStyles.searchBar.input}
+              className={cn(tableStyles.searchBar.input, 'min-w-0 h-full flex-1 cursor-text')}
               ariaLabel={`Search ${filteredDataLength} records`}
               ClearSearchBtn={ClearSearchBtn}
-              clearButtonClassName={tableStyles.searchBar.clearButton}
+              clearButtonClassName={cn(tableStyles.searchBar.clearButton, 'shrink-0 cursor-pointer')}
               clearButtonIcon={icons.X ? (
                 <icons.X className={tableStyles.searchBar.clearButtonIcon} />
               ) : null}

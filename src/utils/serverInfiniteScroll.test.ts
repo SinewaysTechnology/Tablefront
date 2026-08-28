@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  isServerLoadingMore,
+  isServerLoadingMoreVisible,
   resolveEstimateSize,
   shouldPrefetchNextServerPage,
 } from './serverInfiniteScroll.ts'
@@ -57,6 +59,73 @@ test('shouldPrefetchNextServerPage does not prefetch from the top of a filled vi
     total: 400,
     scrollTop: 0,
   }), false)
+})
+
+test('isServerLoadingMore ignores first-page sort and search fetches', () => {
+  assert.equal(isServerLoadingMore({
+    isFetching: true,
+    pageIndex: 0,
+    loadedCount: 50,
+    serverTotal: 40014,
+  }), false)
+  assert.equal(isServerLoadingMore({
+    isFetching: true,
+    pageIndex: 1,
+    loadedCount: 50,
+    serverTotal: 40014,
+  }), true)
+  assert.equal(isServerLoadingMore({
+    isFetching: false,
+    pageIndex: 1,
+    loadedCount: 50,
+    serverTotal: 40014,
+  }), false)
+})
+
+test('isServerLoadingMore treats an unknown total as still having more pages', () => {
+  assert.equal(isServerLoadingMore({
+    isFetching: true,
+    pageIndex: 1,
+    loadedCount: 50,
+    serverTotal: 0,
+  }), true)
+  assert.equal(isServerLoadingMore({
+    isFetching: true,
+    pageIndex: 1,
+    loadedCount: 0,
+    serverTotal: 0,
+  }), false)
+})
+
+test('isServerLoadingMoreVisible is true as soon as the next page is requested', () => {
+  assert.equal(isServerLoadingMoreVisible({
+    requestedMore: true,
+    isFetching: false,
+    pageIndex: 1,
+    loadedCount: 50,
+    serverTotal: 40014,
+  }), true)
+  assert.equal(isServerLoadingMoreVisible({
+    requestedMore: false,
+    isFetching: false,
+    pageIndex: 0,
+    loadedCount: 50,
+    serverTotal: 40014,
+  }), false)
+  assert.equal(isServerLoadingMoreVisible({
+    requestedMore: true,
+    isFetching: false,
+    pageIndex: 0,
+    loadedCount: 50,
+    serverTotal: 40014,
+  }), false)
+  assert.equal(isServerLoadingMoreVisible({
+    requestedMore: false,
+    isFetching: true,
+    pageIndex: 1,
+    loadedCount: 50,
+    serverTotal: 40014,
+  }), true)
 })
 
 test('resolveEstimateSize rejects zero and non-finite values', () => {

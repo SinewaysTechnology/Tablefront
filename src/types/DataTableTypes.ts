@@ -242,6 +242,8 @@ export interface DataTableProps<TData> {
     of?: string
     /** Column settings reset button. @default "Reset to defaults" */
     resetToDefaults?: string
+    /** Infinite-scroll loading-more row. Falls back to `loadingText`. */
+    loadingMore?: string
   }
   /**
    * Server-side search, sort, and paging.
@@ -253,6 +255,8 @@ export interface DataTableProps<TData> {
   server?: DataTableServerConfig
   /**
    * Global loading state for the table.
+   * Column headers stay mounted. The empty-body spinner appears after 1s.
+   * Existing rows dim while a sort/search/filter replace is in flight.
    * @default false
    */
   isLoading?: boolean
