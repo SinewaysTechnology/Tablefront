@@ -780,11 +780,6 @@ export const shouldShowHeaderText = (columnWidth: number): boolean => {
   return columnWidth > HEADER_MIN_WIDTH_FOR_TEXT
 }
 
-export const truncateHeaderText = (text: string, maxLength: number = 15): string => {
-  if (!text || text.length <= maxLength) return text
-  return text.substring(0, maxLength).trim() + '...'
-}
-
 // Get current column width from DOM
 export const getCurrentColumnWidth = (columnId: string): number => {
   const headerCell = document.querySelector(`th[data-column-id="${columnId}"]`) as HTMLElement

@@ -2,12 +2,12 @@ import React from 'react'
 import type { SmartHeaderProps } from '../types/DataTableTypes'
 import { 
   shouldShowHeaderText, 
-  truncateHeaderText, 
   getCurrentColumnWidth 
 } from '../utils'
 
 /**
- * Smart header component that auto-truncates text when column gets too narrow
+ * Header label. The column shows the full text, and CSS ellipsis applies only
+ * when the header cell is narrower than that text.
  */
 export function SmartHeader({ 
   text, 
@@ -85,11 +85,11 @@ export function SmartHeader({
       }}
     >
       {showText && (
-        <span 
+        <span
           className="truncate min-w-0 mr-1"
-          title={text.length > 15 ? text : undefined}
+          title={text}
         >
-          {truncateHeaderText(text)}
+          {text}
         </span>
       )}
       {sortIcon && (
